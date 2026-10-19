@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shift Hours — DLX / DMT</title>
+<title>Shift Hours — Sites</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -17,6 +17,8 @@
   .th { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em; color: #9ca3af; font-weight: 600; }
   .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.02); }
   .tab.active { border-bottom: 2px solid #000; color: #000; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { scrollbar-width: none; }
   .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
   .custom-scroll::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
   .fade-in { animation: fadeIn .2s ease-out; }
@@ -56,9 +58,9 @@
   <!-- Title row -->
   <div class="flex flex-col lg:flex-row lg:items-end gap-4 mb-6">
     <div>
-      <div class="eyebrow mb-2">Operations · Deluxe &amp; DMT · Sign-ins</div>
+      <div class="eyebrow mb-2">Operations · All sites · Sign-ins</div>
       <h1 class="display-font text-[32px] sm:text-[38px] font-semibold leading-none">Shift Hours.</h1>
-      <p class="text-[13px] text-gray-500 mt-2">Weekly sign-in hours per driver — Deluxe and Direct Medical Transport. Oregon Taxi stays on the owner portal.</p>
+      <p class="text-[13px] text-gray-500 mt-2">Weekly sign-in hours per driver, by iCabbi site. Oregon Taxi (ORTX) stays on the owner portal.</p>
     </div>
     <div class="lg:ml-auto flex flex-wrap items-center gap-2">
       <div class="flex items-center rounded-md border border-gray-200 bg-white overflow-hidden">
@@ -73,11 +75,9 @@
   </div>
 
   <!-- Brand tabs -->
-  <div class="flex items-center gap-6 border-b border-gray-200 mb-6" id="brandTabs">
-    <button data-brand="all" class="tab active pb-2.5 -mb-px mono text-[11px] uppercase tracking-[0.12em] font-semibold text-gray-400 hover:text-black">All <span class="cnt text-gray-400 font-normal"></span></button>
-    <button data-brand="DLX" class="tab pb-2.5 -mb-px mono text-[11px] uppercase tracking-[0.12em] font-semibold text-gray-400 hover:text-black">Deluxe <span class="cnt text-gray-400 font-normal"></span></button>
-    <button data-brand="DMT" class="tab pb-2.5 -mb-px mono text-[11px] uppercase tracking-[0.12em] font-semibold text-gray-400 hover:text-black">DMT <span class="cnt text-gray-400 font-normal"></span></button>
-    <div class="ml-auto pb-2 hidden sm:block">
+  <div class="flex items-end gap-4 border-b border-gray-200 mb-6">
+    <div class="flex items-center gap-6 overflow-x-auto scrollbar-hide -mb-px" id="brandTabs"></div>
+    <div class="ml-auto pb-2 hidden sm:block flex-shrink-0">
       <div class="relative">
         <i class="ph ph-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
         <input id="search" placeholder="Driver or ref" class="h-8 pl-8 pr-3 w-52 rounded-md border border-gray-200 bg-white text-[12.5px] focus:outline-none focus:border-black">
@@ -93,18 +93,19 @@
   <div class="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
     <!-- Weekly table -->
     <section class="card overflow-hidden">
-      <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-100">
+      <div class="px-5 py-4 flex flex-wrap items-center gap-3 border-b border-gray-100">
         <div class="w-7 h-7 rounded-[4px] border border-gray-200 flex items-center justify-center"><i class="ph-bold ph-clock text-sm"></i></div>
         <div>
           <div class="text-[13px] font-semibold">Weekly hours by driver</div>
           <div class="eyebrow !text-[9px]" id="tableMeta">—</div>
         </div>
-        <div class="ml-auto flex items-center gap-2">
+        <div class="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-2">
           <select id="sortSel" class="h-8 px-2 rounded-md border border-gray-200 bg-white text-[12px] focus:outline-none focus:border-black">
             <option value="hours">Sort · Hours</option>
             <option value="name">Sort · Name</option>
             <option value="shifts">Sort · Shifts</option>
           </select>
+          <button id="btnGroup" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12px] font-medium flex items-center gap-1.5" title="Group by site"><i class="ph-bold ph-stack"></i><span class="hidden sm:inline">Group by site</span></button>
           <button id="btnNoName" class="hidden h-8 px-2.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 text-[12px] font-medium items-center gap-1.5"><i class="ph-bold ph-user-focus"></i><span></span></button>
         </div>
       </div>
@@ -118,7 +119,7 @@
       </div>
       <div id="emptyState" class="hidden px-5 py-12 text-center">
         <div class="text-[13px] font-medium">No sign-ins found</div>
-        <div class="text-[12px] text-gray-500 mt-1">No Deluxe or DMT shifts for this week.</div>
+        <div class="text-[12px] text-gray-500 mt-1">No shifts for this site this week.</div>
       </div>
       <div id="loading" class="px-5 py-12 flex justify-center"><div class="spinner"></div></div>
     </section>
@@ -203,13 +204,9 @@
     </div>
     <div class="px-6 py-5 space-y-5 text-[13px]">
       <div>
-        <label class="th block mb-1.5">Deluxe iCabbi driver_site_id</label>
-        <input id="setDlx" class="w-full h-9 px-3 rounded-md border border-gray-200 mono focus:outline-none focus:border-black" placeholder="57">
-      </div>
-      <div>
-        <label class="th block mb-1.5">DMT iCabbi driver_site_id</label>
-        <input id="setDmt" class="w-full h-9 px-3 rounded-md border border-gray-200 mono focus:outline-none focus:border-black" placeholder="58">
-        <p class="text-[11.5px] text-gray-500 mt-1.5">Comma-separate to include more than one site id.</p>
+        <label class="th block mb-1.5">Site map · iCabbi driver_site_id = site</label>
+        <textarea id="setSites" rows="7" class="w-full px-3 py-2 rounded-md border border-gray-200 mono text-[12px] focus:outline-none focus:border-black" placeholder="57=XDLX Deluxe"></textarea>
+        <p class="text-[11.5px] text-gray-500 mt-1.5">One per line: <span class="mono">id=CODE Name</span>. Ids not listed are left out (ORTX 54 is excluded on purpose).</p>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -240,20 +237,35 @@ const PAGE = 1000;
 const REFRESH_MS = 60000;
 const LONG_SHIFT_MIN = 16 * 60;   // any normal shift longer than this gets flagged
 
-const DEFAULTS = { dlx: '57', dmt: '58', weekStart: 1, ot: 40 };
+const DEFAULT_SITES = '55=RBG Roseburg\n56=XCC Oregon Coast\n57=XDLX Deluxe\n58=XDMT DMT\n59=XGP Secure Transport\n60=XLB Albany / Salem\n61=XSLM Eastern Oregon';
+const DEFAULTS = { sites: DEFAULT_SITES, weekStart: 1, ot: 40, group: true };
 function loadSettings() {
-  try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('dlxdmt.hours.settings') || '{}')); }
+  try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('shifthours.settings') || '{}')); }
   catch (e) { return { ...DEFAULTS }; }
 }
-function saveSettings(s) { try { localStorage.setItem('dlxdmt.hours.settings', JSON.stringify(s)); } catch (e) {} }
+function saveSettings(s) { try { localStorage.setItem('shifthours.settings', JSON.stringify(s)); } catch (e) {} }
 let SETTINGS = loadSettings();
 
 const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-const BRAND = {
-  DLX: { label: 'Deluxe', chip: 'bg-blue-50 text-blue-700' },
-  DMT: { label: 'DMT',    chip: 'bg-emerald-50 text-emerald-700' },
-};
+const CHIPS = { XDLX: 'bg-blue-50 text-blue-700', XDMT: 'bg-emerald-50 text-emerald-700', XCC: 'bg-cyan-50 text-cyan-700', RBG: 'bg-amber-50 text-amber-700', XLB: 'bg-purple-50 text-purple-700', XSLM: 'bg-orange-50 text-orange-700', XGP: 'bg-red-50 text-red-700' };
+let SITE_MAP = {}, SITE_ORDER = [];
+function parseSites() {
+  SITE_MAP = {}; SITE_ORDER = [];
+  String(SETTINGS.sites || DEFAULT_SITES).split(/\n|,/).forEach(line => {
+    const m = line.trim().match(/^(\d+)\s*=\s*([A-Za-z0-9_-]+)\s*(.*)$/);
+    if (!m) return;
+    const code = m[2].toUpperCase();
+    SITE_MAP[m[1]] = code;
+    if (!SITE_ORDER.find(x => x.code === code)) SITE_ORDER.push({ code, label: m[3].trim() || code });
+  });
+}
+parseSites();
+function siteInfo(code) {
+  const s = SITE_ORDER.find(x => x.code === code);
+  return { label: code, name: s ? s.label : code, chip: CHIPS[code] || 'bg-gray-100 text-gray-700' };
+}
+const BRAND = new Proxy({}, { get: (_, code) => siteInfo(code) });
 
 /* ═════════ Date helpers (Pacific) ═════════ */
 function pstDateStr(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d); } // YYYY-MM-DD
@@ -293,10 +305,7 @@ async function fetchAll(build) {
 
 function siteToBrand(siteId) {
   const s = String(siteId ?? '');
-  const ids = v => String(v).split(',').map(x => x.trim()).filter(Boolean);
-  if (ids(SETTINGS.dlx).includes(s)) return 'DLX';
-  if (ids(SETTINGS.dmt).includes(s)) return 'DMT';
-  return null;
+  return SITE_MAP[s] || null;
 }
 
 /* Work out minutes for a shift and whether it needs review. */
@@ -436,14 +445,17 @@ function render() {
   document.getElementById('lastSync').textContent = state.lastSync ? 'Synced ' + state.lastSync.toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }) : '—';
   document.getElementById('loading').classList.toggle('hidden', !state.loading);
 
-  // tab counts
+  // site tabs (built from the site map; empty sites dimmed)
   const allAgg = aggregate(state.shifts).drivers;
-  document.querySelectorAll('#brandTabs .tab').forEach(t => {
-    const b = t.dataset.brand;
-    const n = b === 'all' ? allAgg.length : allAgg.filter(d => d.brand === b).length;
-    t.querySelector('.cnt').textContent = state.loading && !state.shifts.length ? '' : n;
-    t.classList.toggle('active', b === state.brand);
-  });
+  const pending = state.loading && !state.shifts.length;
+  const tabDefs = [{ code: 'all', text: 'All', n: allAgg.length }, ...SITE_ORDER.map(s => ({ code: s.code, text: s.code, title: s.label, n: allAgg.filter(d => d.brand === s.code).length }))];
+  if (state.brand !== 'all' && !SITE_ORDER.find(s => s.code === state.brand)) state.brand = 'all';
+  document.getElementById('brandTabs').innerHTML = tabDefs.map(t => `
+    <button data-brand="${esc(t.code)}" title="${esc(t.title || '')}" class="tab ${t.code === state.brand ? 'active' : ''} pb-2.5 mono text-[11px] uppercase tracking-[0.12em] font-semibold whitespace-nowrap hover:text-black ${t.n || pending || t.code === state.brand ? 'text-gray-400' : 'text-gray-300'}">${esc(t.text)} <span class="text-gray-400 font-normal">${pending ? '' : t.n}</span></button>`).join('');
+  document.querySelectorAll('#brandTabs .tab').forEach(t => t.addEventListener('click', () => { state.brand = t.dataset.brand; render(); }));
+  document.getElementById('btnGroup').classList.toggle('hidden', state.brand !== 'all');
+  document.getElementById('btnGroup').classList.toggle('flex', state.brand === 'all');
+  document.getElementById('btnGroup').classList.toggle('!border-black', !!SETTINGS.group);
 
   const shifts = filtered();
   const { days, drivers } = aggregate(shifts);
@@ -499,7 +511,8 @@ function renderTable(days, rows) {
   const tb = document.getElementById('tbody');
   document.getElementById('emptyState').classList.toggle('hidden', state.loading || rows.length > 0);
   if (state.loading && !state.shifts.length) { tb.innerHTML = ''; return; }
-  tb.innerHTML = rows.map(d => {
+  const grouped = state.brand === 'all' && SETTINGS.group;
+  const rowHtml = d => {
     const pct = Math.min(100, d.total / ot * 100);
     const isOt = d.total >= ot, near = !isOt && d.total >= ot - 240;
     return `<tr class="row border-b border-gray-100 cursor-pointer" data-key="${esc(d.key)}">
@@ -530,7 +543,35 @@ function renderTable(days, rows) {
         <div class="bar mt-1.5"><span class="${isOt ? 'ot' : ''}" style="width:${pct}%;${near ? 'background:#9ca3af' : ''}"></span></div>
       </td>
     </tr>`;
-  }).join('');
+  };
+  if (!grouped) {
+    tb.innerHTML = rows.map(rowHtml).join('');
+  } else {
+    state.collapsed = state.collapsed || {};
+    tb.innerHTML = SITE_ORDER.map(site => {
+      const g = rows.filter(d => d.brand === site.code);
+      if (!g.length) return '';
+      const tot = g.reduce((a, d) => a + d.total, 0);
+      const perDay = days.map(day => g.reduce((a, d) => a + d.perDay[day], 0));
+      const otN = g.filter(d => d.total >= ot).length;
+      const closed = !!state.collapsed[site.code];
+      return `<tr class="grp border-b border-gray-200 bg-gray-50 cursor-pointer select-none" data-site="${esc(site.code)}">
+        <td class="px-5 py-2.5 sticky left-0 bg-gray-50">
+          <div class="flex items-center gap-2">
+            <i class="ph-bold ${closed ? 'ph-caret-right' : 'ph-caret-down'} text-[11px] text-gray-500"></i>
+            <span class="w-1 h-4 rounded-sm bg-black"></span>
+            <span class="px-1.5 py-px rounded-[4px] mono text-[9.5px] uppercase tracking-[0.1em] font-semibold ${BRAND[site.code].chip}">${esc(site.code)}</span>
+            <span class="text-[12.5px] font-semibold">${esc(site.label)}</span>
+            <span class="mono text-[10.5px] text-gray-500">${g.length} drv${otN ? ` · <span class="text-[#D97757]">${otN} over ${SETTINGS.ot}h</span>` : ''}</span>
+          </div>
+        </td>
+        ${perDay.map(m => `<td class="mono text-right px-2.5 py-2.5 text-[11.5px] ${m ? 'text-gray-600' : 'cell-0'}">${m ? hrs(m) : '—'}</td>`).join('')}
+        <td class="mono text-right px-2.5 py-2.5 text-[11.5px] text-gray-600">${g.reduce((a, d) => a + d.shifts, 0)}</td>
+        <td class="mono text-right px-5 py-2.5 font-semibold">${hrs(tot)}<span class="text-gray-400 font-normal"> h</span></td>
+      </tr>${closed ? '' : g.map(rowHtml).join('')}`;
+    }).join('');
+    tb.querySelectorAll('tr.grp').forEach(tr => tr.addEventListener('click', () => { state.collapsed[tr.dataset.site] = !state.collapsed[tr.dataset.site]; render(); }));
+  }
   tb.querySelectorAll('tr.row').forEach(tr => tr.addEventListener('click', () => openDriver(tr.dataset.key)));
   tb.querySelectorAll('.rn-btn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openRename(b.dataset.ref); }));
 }
@@ -646,14 +687,14 @@ async function saveRename() {
 /* ═════════ CSV ═════════ */
 function exportCsv() {
   const { days, drivers } = aggregate(filtered());
-  const head = ['Brand', 'Driver ref', 'Driver name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'Needs review'];
-  const lines = [head, ...drivers.sort((a, b) => b.total - a.total).map(d => [
-    BRAND[d.brand].label, d.ref, d.name, ...days.map(day => hrs(d.perDay[day])), d.shifts, hrs(d.total), d.review,
+  const head = ['Site', 'Site name', 'Driver ref', 'Driver name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'Needs review'];
+  const lines = [head, ...drivers.sort((a, b) => SITE_ORDER.findIndex(x => x.code === a.brand) - SITE_ORDER.findIndex(x => x.code === b.brand) || b.total - a.total).map(d => [
+    d.brand, BRAND[d.brand].name, d.ref, d.name, ...days.map(day => hrs(d.perDay[day])), d.shifts, hrs(d.total), d.review,
   ])].map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `shift-hours-${state.brand === 'all' ? 'dlx-dmt' : state.brand.toLowerCase()}-${state.weekStart}.csv`;
+  a.download = `shift-hours-${state.brand === 'all' ? 'all-sites' : state.brand.toLowerCase()}-${state.weekStart}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
@@ -670,7 +711,7 @@ document.getElementById('btnRefresh').onclick = () => load();
 document.getElementById('btnCsv').onclick = exportCsv;
 document.getElementById('search').oninput = e => { state.search = e.target.value; render(); };
 document.getElementById('sortSel').onchange = e => { state.sort = e.target.value; render(); };
-document.querySelectorAll('#brandTabs .tab').forEach(t => t.addEventListener('click', () => { state.brand = t.dataset.brand; render(); }));
+document.getElementById('btnGroup').onclick = () => { SETTINGS.group = !SETTINGS.group; saveSettings(SETTINGS); render(); };
 
 document.getElementById('btnNoName').onclick = () => { state.noNameOnly = !state.noNameOnly; render(); };
 document.querySelectorAll('[data-close-rename]').forEach(b => b.addEventListener('click', closeRename));
@@ -678,8 +719,7 @@ document.getElementById('rnSave').onclick = saveRename;
 document.getElementById('rnInput').addEventListener('keydown', e => { if (e.key === 'Enter') saveRename(); });
 
 document.getElementById('btnSettings').onclick = () => {
-  document.getElementById('setDlx').value = SETTINGS.dlx;
-  document.getElementById('setDmt').value = SETTINGS.dmt;
+  document.getElementById('setSites').value = SETTINGS.sites || DEFAULT_SITES;
   document.getElementById('setWeekStart').value = String(SETTINGS.weekStart);
   document.getElementById('setOt').value = SETTINGS.ot;
   document.getElementById('settings').classList.remove('hidden');
@@ -687,12 +727,13 @@ document.getElementById('btnSettings').onclick = () => {
 document.querySelectorAll('[data-close-settings]').forEach(b => b.addEventListener('click', () => document.getElementById('settings').classList.add('hidden')));
 document.getElementById('btnSaveSettings').onclick = () => {
   SETTINGS = {
-    dlx: document.getElementById('setDlx').value.trim() || DEFAULTS.dlx,
-    dmt: document.getElementById('setDmt').value.trim() || DEFAULTS.dmt,
+    sites: document.getElementById('setSites').value.trim() || DEFAULT_SITES,
+    group: SETTINGS.group,
     weekStart: Number(document.getElementById('setWeekStart').value),
     ot: Number(document.getElementById('setOt').value) || DEFAULTS.ot,
   };
   saveSettings(SETTINGS);
+  parseSites();
   state.weekStart = weekStartOf(state.weekStart, SETTINGS.weekStart);
   document.getElementById('settings').classList.add('hidden');
   state.shifts = [];
