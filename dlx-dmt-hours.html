@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shift Hours — DLX / DMT</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+  .display-font { font-family: 'Inter Tight', sans-serif; letter-spacing: -0.02em; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: #9ca3af; font-weight: 600; }
+  .th { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em; color: #9ca3af; font-weight: 600; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.02); }
+  .tab.active { border-bottom: 2px solid #000; color: #000; }
+  .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .custom-scroll::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
+  .fade-in { animation: fadeIn .2s ease-out; }
+  @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+  .panel-enter { animation: slideUp .2s ease-out; }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(20px) } to { opacity: 1; transform: none } }
+  .backdrop { background: rgba(0,0,0,.3); backdrop-filter: blur(2px); }
+  tr.row:hover td { background: #f9fafb; }
+  .cell-0 { color: #d1d5db; }
+  .bar { height: 4px; border-radius: 2px; background: #f3f4f6; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: #000; }
+  .bar > span.ot { background: #D97757; }
+  .spinner { width: 20px; height: 20px; border: 2px solid #e5e7eb; border-top-color: #111; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  @media (max-width: 639px) { input, select { font-size: 16px !important; } }
+</style>
+</head>
+<body class="bg-[#faf9f8] text-[#1a1a1a]">
+
+<!-- Header -->
+<header class="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-gray-200">
+  <div class="max-w-[1400px] mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
+    <div class="w-7 h-7 bg-black text-white rounded-[4px] flex items-center justify-center display-font font-semibold text-sm">D</div>
+    <div class="flex items-center gap-1.5 text-[13px] text-gray-500">
+      <span>Operations</span><i class="ph ph-caret-right text-[11px]"></i><span class="text-black font-medium">Shift Hours</span>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      <span id="liveDot" class="hidden sm:flex items-center gap-1.5 eyebrow"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span><span id="lastSync">—</span></span>
+      <button id="btnRefresh" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12.5px] font-medium flex items-center gap-1.5"><i class="ph-bold ph-arrows-clockwise"></i><span class="hidden sm:inline">Refresh</span></button>
+      <button id="btnCsv" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12.5px] font-medium flex items-center gap-1.5"><i class="ph-bold ph-download-simple"></i><span class="hidden sm:inline">Export CSV</span></button>
+      <button id="btnSettings" class="h-8 w-8 rounded-md border border-gray-200 bg-white hover:bg-gray-50 flex items-center justify-center" title="Settings"><i class="ph-bold ph-gear-six"></i></button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+  <!-- Title row -->
+  <div class="flex flex-col lg:flex-row lg:items-end gap-4 mb-6">
+    <div>
+      <div class="eyebrow mb-2">Operations · Deluxe &amp; DMT · Sign-ins</div>
+      <h1 class="display-font text-[32px] sm:text-[38px] font-semibold leading-none">Shift Hours.</h1>
+      <p class="text-[13px] text-gray-500 mt-2">Weekly sign-in hours per driver — Deluxe and Direct Medical Transport. Oregon Taxi stays on the owner portal.</p>
+    </div>
+    <div class="lg:ml-auto flex flex-wrap items-center gap-2">
+      <div class="flex items-center rounded-md border border-gray-200 bg-white overflow-hidden">
+        <button id="wkPrev" class="h-9 w-9 flex items-center justify-center hover:bg-gray-50 border-r border-gray-200"><i class="ph-bold ph-caret-left"></i></button>
+        <div class="px-3 text-center min-w-[190px]">
+          <div class="mono text-[12.5px] font-semibold" id="wkLabel">—</div>
+        </div>
+        <button id="wkNext" class="h-9 w-9 flex items-center justify-center hover:bg-gray-50 border-l border-gray-200"><i class="ph-bold ph-caret-right"></i></button>
+      </div>
+      <button id="wkThis" class="h-9 px-3 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12.5px] font-medium">This week</button>
+    </div>
+  </div>
+
+  <!-- Brand tabs -->
+  <div class="flex items-center gap-6 border-b border-gray-200 mb-6" id="brandTabs">
+    <button data-brand="all" class="tab active pb-2.5 -mb-px mono text-[11px] uppercase tracking-[0.12em] font-semibold text-gray-400 hover:text-black">All <span class="cnt text-gray-400 font-normal"></span></button>
+    <button data-brand="DLX" class="tab pb-2.5 -mb-px mono text-[11px] uppercase tracking-[0.12em] font-semibold text-gray-400 hover:text-black">Deluxe <span class="cnt text-gray-400 font-normal"></span></button>
+    <button data-brand="DMT" class="tab pb-2.5 -mb-px mono text-[11px] uppercase tracking-[0.12em] font-semibold text-gray-400 hover:text-black">DMT <span class="cnt text-gray-400 font-normal"></span></button>
+    <div class="ml-auto pb-2 hidden sm:block">
+      <div class="relative">
+        <i class="ph ph-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+        <input id="search" placeholder="Driver or ref" class="h-8 pl-8 pr-3 w-52 rounded-md border border-gray-200 bg-white text-[12.5px] focus:outline-none focus:border-black">
+      </div>
+    </div>
+  </div>
+
+  <div id="errorBox" class="hidden mb-6 rounded-lg border border-red-200 bg-red-50 text-red-700 text-[13px] px-4 py-3"></div>
+
+  <!-- KPIs -->
+  <section class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-px bg-gray-200 border border-gray-200 rounded-lg overflow-hidden mb-6" id="kpis"></section>
+
+  <div class="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
+    <!-- Weekly table -->
+    <section class="card overflow-hidden">
+      <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-100">
+        <div class="w-7 h-7 rounded-[4px] border border-gray-200 flex items-center justify-center"><i class="ph-bold ph-clock text-sm"></i></div>
+        <div>
+          <div class="text-[13px] font-semibold">Weekly hours by driver</div>
+          <div class="eyebrow !text-[9px]" id="tableMeta">—</div>
+        </div>
+        <div class="ml-auto flex items-center gap-2">
+          <select id="sortSel" class="h-8 px-2 rounded-md border border-gray-200 bg-white text-[12px] focus:outline-none focus:border-black">
+            <option value="hours">Sort · Hours</option>
+            <option value="name">Sort · Name</option>
+            <option value="shifts">Sort · Shifts</option>
+          </select>
+        </div>
+      </div>
+      <div class="overflow-x-auto custom-scroll">
+        <table class="w-full text-[12.5px]">
+          <thead class="bg-gray-50/50 border-b border-gray-100">
+            <tr id="theadRow"></tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div id="emptyState" class="hidden px-5 py-12 text-center">
+        <div class="text-[13px] font-medium">No sign-ins found</div>
+        <div class="text-[12px] text-gray-500 mt-1">No Deluxe or DMT shifts for this week.</div>
+      </div>
+      <div id="loading" class="px-5 py-12 flex justify-center"><div class="spinner"></div></div>
+    </section>
+
+    <!-- Side column -->
+    <aside class="space-y-6">
+      <section class="card overflow-hidden">
+        <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-100">
+          <div class="w-7 h-7 rounded-[4px] border border-gray-200 flex items-center justify-center"><i class="ph-bold ph-steering-wheel text-sm"></i></div>
+          <div class="text-[13px] font-semibold">On shift now</div>
+          <span class="ml-auto mono text-[11px] text-gray-500" id="liveCount">0</span>
+        </div>
+        <div id="liveList" class="divide-y divide-gray-100 max-h-[360px] overflow-y-auto custom-scroll"></div>
+      </section>
+
+      <section class="card overflow-hidden">
+        <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-100">
+          <div class="w-7 h-7 rounded-[4px] border border-gray-200 flex items-center justify-center"><i class="ph-bold ph-warning text-sm"></i></div>
+          <div>
+            <div class="text-[13px] font-semibold">Needs review</div>
+            <div class="eyebrow !text-[9px]">Missed sign-outs · unmatched</div>
+          </div>
+          <span class="ml-auto mono text-[11px] text-gray-500" id="reviewCount">0</span>
+        </div>
+        <div id="reviewList" class="divide-y divide-gray-100 max-h-[420px] overflow-y-auto custom-scroll"></div>
+      </section>
+    </aside>
+  </div>
+
+  <p class="mt-6 text-[11.5px] text-gray-500 leading-relaxed max-w-3xl">
+    Hours come from iCabbi sign-in / sign-out events. Shifts count toward the day they started. When a driver never signs out, the shift is auto-closed at the nightly timeout — those hours are counted only to the driver's last completed trip and marked <span class="mono">~</span>. Sign-outs with no matching sign-in count as zero.
+  </p>
+</main>
+
+<!-- Driver drawer -->
+<div id="drawer" class="hidden fixed inset-0 z-40">
+  <div class="absolute inset-0 backdrop" data-close></div>
+  <div class="absolute right-0 top-0 h-full w-full sm:w-[520px] bg-white border-l border-gray-200 panel-enter flex flex-col">
+    <div class="px-6 py-5 border-b border-gray-200 flex items-start gap-3">
+      <div>
+        <div class="eyebrow mb-1" id="dwEyebrow">—</div>
+        <div class="display-font text-[24px] font-semibold leading-tight" id="dwName">—</div>
+      </div>
+      <button class="ml-auto h-8 w-8 rounded-md hover:bg-gray-100 flex items-center justify-center" data-close><i class="ph-bold ph-x"></i></button>
+    </div>
+    <div class="grid grid-cols-3 gap-px bg-gray-200 border-b border-gray-200" id="dwKpis"></div>
+    <div class="flex-1 overflow-y-auto custom-scroll" id="dwBody"></div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div id="settings" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div class="absolute inset-0 backdrop" data-close-settings></div>
+  <div class="relative w-full max-w-md bg-white rounded-[10px] border border-gray-200 panel-enter">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <div class="eyebrow mb-1">Admin · Configuration</div>
+      <div class="display-font text-[20px] font-semibold">Settings.</div>
+    </div>
+    <div class="px-6 py-5 space-y-5 text-[13px]">
+      <div>
+        <label class="th block mb-1.5">Deluxe iCabbi driver_site_id</label>
+        <input id="setDlx" class="w-full h-9 px-3 rounded-md border border-gray-200 mono focus:outline-none focus:border-black" placeholder="57">
+      </div>
+      <div>
+        <label class="th block mb-1.5">DMT iCabbi driver_site_id</label>
+        <input id="setDmt" class="w-full h-9 px-3 rounded-md border border-gray-200 mono focus:outline-none focus:border-black" placeholder="58">
+        <p class="text-[11.5px] text-gray-500 mt-1.5">Comma-separate to include more than one site id.</p>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="th block mb-1.5">Week starts</label>
+          <select id="setWeekStart" class="w-full h-9 px-2 rounded-md border border-gray-200 bg-white focus:outline-none focus:border-black">
+            <option value="1">Monday</option><option value="0">Sunday</option>
+          </select>
+        </div>
+        <div>
+          <label class="th block mb-1.5">Overtime at (hrs)</label>
+          <input id="setOt" type="number" class="w-full h-9 px-3 rounded-md border border-gray-200 mono focus:outline-none focus:border-black" placeholder="40">
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
+      <button class="h-9 px-3 rounded-md border border-gray-200 text-[12.5px] font-medium hover:bg-gray-50" data-close-settings>Cancel</button>
+      <button id="btnSaveSettings" class="h-9 px-3 rounded-md bg-black text-white text-[12.5px] font-medium hover:bg-gray-800">Save settings</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═════════ Config ═════════ */
+const SUPABASE_URL = 'https://mdutrtmdjodabggirntb.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kdXRydG1kam9kYWJnZ2lybnRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5MDk3MzQsImV4cCI6MjA5MDQ4NTczNH0.GlrbsjnkBSwhnguBQUCb418NxvRO02PhXhBJZ69xTi4';
+const TZ = 'America/Los_Angeles';
+const PAGE = 1000;
+const REFRESH_MS = 60000;
+const LONG_SHIFT_MIN = 16 * 60;   // any normal shift longer than this gets flagged
+
+const DEFAULTS = { dlx: '57', dmt: '58', weekStart: 1, ot: 40 };
+function loadSettings() {
+  try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('dlxdmt.hours.settings') || '{}')); }
+  catch (e) { return { ...DEFAULTS }; }
+}
+function saveSettings(s) { try { localStorage.setItem('dlxdmt.hours.settings', JSON.stringify(s)); } catch (e) {} }
+let SETTINGS = loadSettings();
+
+const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
+const BRAND = {
+  DLX: { label: 'Deluxe', chip: 'bg-blue-50 text-blue-700' },
+  DMT: { label: 'DMT',    chip: 'bg-emerald-50 text-emerald-700' },
+};
+
+/* ═════════ Date helpers (Pacific) ═════════ */
+function pstDateStr(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d); } // YYYY-MM-DD
+function addDays(ymd, n) { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function dow(ymd) { return new Date(ymd + 'T12:00:00Z').getUTCDay(); }
+function weekStartOf(ymd, startDow) { const off = (dow(ymd) - startDow + 7) % 7; return addDays(ymd, -off); }
+function fmtDay(ymd, opts) { return new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', ...opts }); }
+function fmtTime(iso) { if (!iso) return '—'; return new Date(iso).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }); }
+function fmtDateTime(iso) { if (!iso) return '—'; return new Date(iso).toLocaleString('en-US', { timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+function hrs(min) { return (min / 60).toFixed(1); }
+function hm(min) { const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h}h ${String(m).padStart(2, '0')}m`; }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+/* ═════════ State ═════════ */
+const state = {
+  weekStart: weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart)),
+  brand: 'all', search: '', sort: 'hours',
+  shifts: [], drivers: [], loading: false,
+};
+
+/* ═════════ Data ═════════ */
+async function fetchAll(build) {
+  const out = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return out;
+}
+
+function siteToBrand(siteId) {
+  const s = String(siteId ?? '');
+  const ids = v => String(v).split(',').map(x => x.trim()).filter(Boolean);
+  if (ids(SETTINGS.dlx).includes(s)) return 'DLX';
+  if (ids(SETTINGS.dmt).includes(s)) return 'DMT';
+  return null;
+}
+
+/* Work out minutes for a shift and whether it needs review. */
+function shiftMinutes(s, nowMs) {
+  const inMs = s.signed_in_at ? Date.parse(s.signed_in_at) : null;
+  const outMs = s.signed_out_at ? Date.parse(s.signed_out_at) : null;
+  if (!inMs) return { min: 0, kind: 'unmatched', note: 'Sign-out with no sign-in' };
+  if (s.status === 'signed_in' && !outMs) return { min: Math.max(0, (nowMs - inMs) / 60000), kind: 'live', note: 'On shift' };
+  if (s.status === 'signed_out_auto_timeout') {
+    const last = s.last_trip_completed_at ? Date.parse(s.last_trip_completed_at) : null;
+    if (last && last > inMs && (!outMs || last <= outMs)) return { min: (last - inMs) / 60000, kind: 'estimated', note: 'No sign-out — counted to last trip' };
+    return { min: 0, kind: 'timeout', note: 'No sign-out and no trips — not counted' };
+  }
+  let min = outMs ? (outMs - inMs) / 60000 : (s.total_hours_min || 0);
+  min = Math.max(0, min);
+  if (min > LONG_SHIFT_MIN) return { min, kind: 'long', note: `Over ${LONG_SHIFT_MIN / 60}h shift` };
+  return { min, kind: 'ok', note: '' };
+}
+
+async function load() {
+  if (!sb) { showError('Supabase client failed to load.'); return; }
+  state.loading = true; render();
+  hideError();
+  const ws = state.weekStart, we = addDays(ws, 6);
+  try {
+    // 1) Shifts for the week (all sites; site comes from events)
+    const shifts = await fetchAll(() => sb.from('driver_shifts')
+      .select('id,driver_name,driver_ref,vehicle_ref,date,signed_in_at,signed_out_at,total_hours_min,status,last_trip_completed_at,last_trip_dropoff')
+      .gte('date', ws).lte('date', we).neq('status', 'expected').order('date'));
+
+    // 2) Sign-in/out events with site id, from a lookback window through week end
+    const evFrom = addDays(ws, -45) + 'T00:00:00-08:00';
+    const evTo = addDays(we, 2) + 'T00:00:00-08:00';
+    const events = await fetchAll(() => sb.from('driver_shift_events')
+      .select('driver_ref,event_at,shift_id,site:raw->>driver_site_id')
+      .not('raw->>driver_site_id', 'is', null)
+      .gte('event_at', evFrom).lt('event_at', evTo).order('event_at'));
+
+    // Drivers with shifts but no recent events: look back further
+    const seen = new Set(events.map(e => String(e.driver_ref)));
+    const missing = [...new Set(shifts.map(s => String(s.driver_ref)).filter(r => r && !seen.has(r)))];
+    for (let i = 0; i < missing.length; i += 100) {
+      const chunk = missing.slice(i, i + 100);
+      const more = await fetchAll(() => sb.from('driver_shift_events')
+        .select('driver_ref,event_at,shift_id,site:raw->>driver_site_id')
+        .not('raw->>driver_site_id', 'is', null)
+        .in('driver_ref', chunk).lt('event_at', evTo).order('event_at'));
+      events.push(...more);
+    }
+    events.sort((a, b) => Date.parse(a.event_at) - Date.parse(b.event_at));
+
+    // Fill missing driver names from the directory
+    const noName = [...new Set(shifts.filter(s => !s.driver_name && s.driver_ref).map(s => String(s.driver_ref)))];
+    if (noName.length) {
+      const names = new Map();
+      for (let i = 0; i < noName.length; i += 100) {
+        const { data } = await sb.from('driver_directory').select('driver_ref,driver_name').in('driver_ref', noName.slice(i, i + 100));
+        (data || []).forEach(r => r.driver_name && names.set(String(r.driver_ref), r.driver_name));
+      }
+      shifts.forEach(s => { if (!s.driver_name) s.driver_name = names.get(String(s.driver_ref)) || ''; });
+    }
+
+    state.shifts = attributeSites(shifts, events);
+    state.lastSync = new Date();
+  } catch (err) {
+    console.error(err);
+    showError('Could not load shifts — ' + (err.message || err));
+  }
+  state.loading = false;
+  render();
+}
+
+/* Give each shift the site the driver was signed into at the time. */
+function attributeSites(shifts, events) {
+  const byShift = new Map(), byDriver = new Map();
+  for (const e of events) {
+    if (!e.site || !/^\d+$/.test(e.site)) continue;
+    if (e.shift_id) byShift.set(e.shift_id, e.site);
+    const k = String(e.driver_ref);
+    if (!byDriver.has(k)) byDriver.set(k, []);
+    byDriver.get(k).push({ t: Date.parse(e.event_at), site: e.site });
+  }
+  const nowMs = Date.now();
+  const out = [];
+  for (const s of shifts) {
+    let site = byShift.get(s.id) || null;
+    if (!site) {
+      const list = byDriver.get(String(s.driver_ref)) || [];
+      const anchor = Date.parse(s.signed_in_at || s.signed_out_at || (s.date + 'T12:00:00-07:00')) + 5 * 60000;
+      let pick = null;
+      for (const ev of list) { if (ev.t <= anchor) pick = ev; else break; }
+      if (!pick && list.length) pick = list[0];
+      site = pick ? pick.site : null;
+    }
+    const brand = siteToBrand(site);
+    if (!brand) continue;
+    const m = shiftMinutes(s, nowMs);
+    out.push({ ...s, site, brand, min: m.min, kind: m.kind, note: m.note });
+  }
+  return out;
+}
+
+/* ═════════ Aggregation ═════════ */
+function aggregate(shifts) {
+  const days = [...Array(7)].map((_, i) => addDays(state.weekStart, i));
+  const map = new Map();
+  for (const s of shifts) {
+    const key = s.brand + ':' + s.driver_ref;
+    if (!map.has(key)) map.set(key, { key, ref: s.driver_ref, name: s.driver_name || '', brand: s.brand, perDay: Object.fromEntries(days.map(d => [d, 0])), total: 0, shifts: 0, review: 0, live: false, list: [], vehicles: new Set() });
+    const d = map.get(key);
+    if (!d.name && s.driver_name) d.name = s.driver_name;
+    if (s.date in d.perDay) d.perDay[s.date] += s.min;
+    d.total += s.min;
+    if (s.signed_in_at) d.shifts++;
+    if (['unmatched', 'timeout', 'estimated', 'long'].includes(s.kind)) d.review++;
+    if (s.kind === 'live') d.live = true;
+    if (s.vehicle_ref) d.vehicles.add(s.vehicle_ref);
+    d.list.push(s);
+  }
+  return { days, drivers: [...map.values()] };
+}
+
+function filtered() {
+  let s = state.shifts;
+  if (state.brand !== 'all') s = s.filter(x => x.brand === state.brand);
+  return s;
+}
+
+/* ═════════ Render ═════════ */
+function render() {
+  const ws = state.weekStart, we = addDays(ws, 6);
+  document.getElementById('wkLabel').textContent = `${fmtDay(ws, { month: 'short', day: 'numeric' })} – ${fmtDay(we, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  document.getElementById('lastSync').textContent = state.lastSync ? 'Synced ' + state.lastSync.toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }) : '—';
+  document.getElementById('loading').classList.toggle('hidden', !state.loading);
+
+  // tab counts
+  const allAgg = aggregate(state.shifts).drivers;
+  document.querySelectorAll('#brandTabs .tab').forEach(t => {
+    const b = t.dataset.brand;
+    const n = b === 'all' ? allAgg.length : allAgg.filter(d => d.brand === b).length;
+    t.querySelector('.cnt').textContent = state.loading && !state.shifts.length ? '' : n;
+    t.classList.toggle('active', b === state.brand);
+  });
+
+  const shifts = filtered();
+  const { days, drivers } = aggregate(shifts);
+  const q = state.search.trim().toLowerCase();
+  let rows = q ? drivers.filter(d => (d.name || '').toLowerCase().includes(q) || String(d.ref).includes(q)) : drivers;
+  rows.sort(state.sort === 'name' ? (a, b) => (a.name || a.ref).localeCompare(b.name || b.ref)
+          : state.sort === 'shifts' ? (a, b) => b.shifts - a.shifts || b.total - a.total
+          : (a, b) => b.total - a.total);
+
+  renderKpis(shifts, drivers);
+  renderTable(days, rows);
+  renderLive(shifts);
+  renderReview(shifts);
+}
+
+function renderKpis(shifts, drivers) {
+  const ot = Number(SETTINGS.ot) * 60;
+  const total = drivers.reduce((a, d) => a + d.total, 0);
+  const signedShifts = shifts.filter(s => s.signed_in_at).length;
+  const k = [
+    ['Drivers', drivers.length, 'signed in this week'],
+    ['Shifts', signedShifts, 'with a sign-in'],
+    ['Total hours', hrs(total), 'all drivers'],
+    ['Avg / driver', drivers.length ? hrs(total / drivers.length) : '0.0', 'hours'],
+    [`${SETTINGS.ot}h+`, drivers.filter(d => d.total >= ot).length, `near: ${drivers.filter(d => d.total >= ot - 240 && d.total < ot).length}`],
+    ['Needs review', shifts.filter(s => ['unmatched', 'timeout', 'estimated', 'long'].includes(s.kind)).length, 'shifts'],
+  ];
+  document.getElementById('kpis').innerHTML = k.map(([l, v, sub], i) => `
+    <div class="bg-white px-5 py-4">
+      <div class="eyebrow !text-[9px] mb-2">${String(i + 1).padStart(2, '0')} · ${esc(l)}</div>
+      <div class="display-font text-[28px] font-semibold leading-none mono-num ${i === 4 && Number(v) > 0 ? 'text-[#D97757]' : ''}">${esc(v)}</div>
+      <div class="text-[11px] text-gray-500 mt-1.5">${esc(sub)}</div>
+    </div>`).join('');
+}
+
+function renderTable(days, rows) {
+  const ot = Number(SETTINGS.ot) * 60;
+  const today = pstDateStr(new Date());
+  document.getElementById('theadRow').innerHTML = `
+    <th class="th text-left px-5 py-2.5 sticky left-0 bg-gray-50">Driver</th>
+    ${days.map(d => `<th class="th text-right px-2.5 py-2.5 ${d === today ? '!text-black' : ''}">${fmtDay(d, { weekday: 'short' })}<div class="font-normal normal-case tracking-normal">${fmtDay(d, { month: 'numeric', day: 'numeric' })}</div></th>`).join('')}
+    <th class="th text-right px-2.5 py-2.5">Shifts</th>
+    <th class="th text-right px-5 py-2.5 min-w-[130px]">Week total</th>`;
+  const meta = document.getElementById('tableMeta');
+  meta.textContent = `${rows.length} drivers · OT line ${SETTINGS.ot}h · Week starts ${Number(SETTINGS.weekStart) === 1 ? 'Mon' : 'Sun'}`;
+
+  const tb = document.getElementById('tbody');
+  document.getElementById('emptyState').classList.toggle('hidden', state.loading || rows.length > 0);
+  if (state.loading && !state.shifts.length) { tb.innerHTML = ''; return; }
+  tb.innerHTML = rows.map(d => {
+    const pct = Math.min(100, d.total / ot * 100);
+    const isOt = d.total >= ot, near = !isOt && d.total >= ot - 240;
+    return `<tr class="row border-b border-gray-100 cursor-pointer" data-key="${esc(d.key)}">
+      <td class="px-5 py-2.5 sticky left-0 bg-white">
+        <div class="flex items-center gap-2">
+          ${d.live ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" title="On shift"></span>' : ''}
+          <div class="min-w-0">
+            <div class="font-medium truncate max-w-[180px]">${esc(d.name || 'Driver ' + d.ref)}</div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span class="mono text-[10.5px] text-gray-500">#${esc(d.ref)}</span>
+              <span class="px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] ${BRAND[d.brand].chip}">${BRAND[d.brand].label}</span>
+              ${d.review ? `<span class="px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] bg-amber-50 text-amber-700">${d.review} review</span>` : ''}
+            </div>
+          </div>
+        </div>
+      </td>
+      ${days.map(day => {
+        const m = d.perDay[day];
+        const est = d.list.some(s => s.date === day && s.kind === 'estimated');
+        return `<td class="mono text-right px-2.5 py-2.5 ${m ? '' : 'cell-0'}">${m ? (est ? '~' : '') + hrs(m) : '—'}</td>`;
+      }).join('')}
+      <td class="mono text-right px-2.5 py-2.5 text-gray-600">${d.shifts}</td>
+      <td class="px-5 py-2.5">
+        <div class="mono text-right font-semibold ${isOt ? 'text-[#D97757]' : ''}">${hrs(d.total)}<span class="text-gray-400 font-normal"> h</span></div>
+        <div class="bar mt-1.5"><span class="${isOt ? 'ot' : ''}" style="width:${pct}%;${near ? 'background:#9ca3af' : ''}"></span></div>
+      </td>
+    </tr>`;
+  }).join('');
+  tb.querySelectorAll('tr.row').forEach(tr => tr.addEventListener('click', () => openDriver(tr.dataset.key)));
+}
+
+function renderLive(shifts) {
+  const live = shifts.filter(s => s.kind === 'live').sort((a, b) => b.min - a.min);
+  document.getElementById('liveCount').textContent = live.length;
+  document.getElementById('liveList').innerHTML = live.length ? live.map(s => `
+    <div class="px-5 py-2.5 flex items-center gap-3">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+      <div class="min-w-0">
+        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'Driver ' + s.driver_ref)}</div>
+        <div class="mono text-[10.5px] text-gray-500">#${esc(s.driver_ref)} · Veh ${esc(s.vehicle_ref || '—')} · ${BRAND[s.brand].label} · in ${fmtTime(s.signed_in_at)}</div>
+      </div>
+      <div class="ml-auto mono text-[12px] font-semibold ${s.min > 12 * 60 ? 'text-[#D97757]' : ''}">${hm(s.min)}</div>
+    </div>`).join('') : `<div class="px-5 py-6 text-[12px] text-gray-500">No one signed in — ${state.weekStart === weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart)) ? 'all quiet.' : 'past week.'}</div>`;
+}
+
+function renderReview(shifts) {
+  const rev = shifts.filter(s => ['unmatched', 'timeout', 'estimated', 'long'].includes(s.kind))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  document.getElementById('reviewCount').textContent = rev.length;
+  const tag = { unmatched: ['No sign-in', 'bg-red-50 text-red-700'], timeout: ['No sign-out', 'bg-red-50 text-red-700'], estimated: ['Est. to last trip', 'bg-amber-50 text-amber-700'], long: ['Long shift', 'bg-amber-50 text-amber-700'] };
+  document.getElementById('reviewList').innerHTML = rev.length ? rev.map(s => `
+    <div class="px-5 py-2.5 cursor-pointer hover:bg-gray-50" data-key="${esc(s.brand + ':' + s.driver_ref)}">
+      <div class="flex items-center gap-2">
+        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'Driver ' + s.driver_ref)}</div>
+        <span class="ml-auto px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] whitespace-nowrap ${tag[s.kind][1]}">${tag[s.kind][0]}</span>
+      </div>
+      <div class="mono text-[10.5px] text-gray-500 mt-0.5">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })} · Veh ${esc(s.vehicle_ref || '—')} · in ${fmtTime(s.signed_in_at)} · ${s.kind === 'estimated' ? 'last trip ' + fmtTime(s.last_trip_completed_at) : 'out ' + fmtDateTime(s.signed_out_at)}${s.min ? ' · ' + hm(s.min) : ''}</div>
+    </div>`).join('') : '<div class="px-5 py-6 text-[12px] text-gray-500">All shifts closed cleanly.</div>';
+  document.querySelectorAll('#reviewList [data-key]').forEach(el => el.addEventListener('click', () => openDriver(el.dataset.key)));
+}
+
+/* ═════════ Drawer ═════════ */
+function openDriver(key) {
+  const { drivers } = aggregate(state.shifts);
+  const d = drivers.find(x => x.key === key);
+  if (!d) return;
+  const ot = Number(SETTINGS.ot) * 60;
+  document.getElementById('dwEyebrow').textContent = `${BRAND[d.brand].label} · Driver #${d.ref}`;
+  document.getElementById('dwName').textContent = d.name || 'Driver ' + d.ref;
+  document.getElementById('dwKpis').innerHTML = [
+    ['Week hours', hrs(d.total)], ['Shifts', d.shifts], ['To ' + SETTINGS.ot + 'h', d.total >= ot ? 'OT +' + hrs(d.total - ot) : hrs(ot - d.total)],
+  ].map(([l, v]) => `<div class="bg-white px-5 py-3.5"><div class="eyebrow !text-[9px] mb-1">${l}</div><div class="display-font text-[22px] font-semibold mono">${v}</div></div>`).join('');
+  const list = [...d.list].sort((a, b) => Date.parse(a.signed_in_at || a.signed_out_at) - Date.parse(b.signed_in_at || b.signed_out_at));
+  const label = { ok: '', live: 'On shift', estimated: 'Est. to last trip', timeout: 'No sign-out', unmatched: 'No sign-in', long: 'Long shift' };
+  document.getElementById('dwBody').innerHTML = `
+    <div class="px-6 pt-5 pb-2 eyebrow">Shifts · ${list.length}</div>
+    <table class="w-full text-[12.5px]">
+      <thead class="border-y border-gray-100 bg-gray-50/50"><tr>
+        <th class="th text-left px-6 py-2">Date</th><th class="th text-left px-2 py-2">Veh</th>
+        <th class="th text-left px-2 py-2">In</th><th class="th text-left px-2 py-2">Out</th><th class="th text-right px-6 py-2">Hours</th>
+      </tr></thead>
+      <tbody>${list.map(s => `
+        <tr class="border-b border-gray-100 align-top">
+          <td class="px-6 py-2.5"><div class="mono">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })}</div>${label[s.kind] ? `<div class="text-[10.5px] ${s.kind === 'live' ? 'text-emerald-700' : 'text-amber-700'} mt-0.5">${label[s.kind]}</div>` : ''}</td>
+          <td class="mono px-2 py-2.5">${esc(s.vehicle_ref || '—')}</td>
+          <td class="mono px-2 py-2.5">${fmtTime(s.signed_in_at)}</td>
+          <td class="mono px-2 py-2.5">${s.kind === 'live' ? '—' : s.kind === 'estimated' ? '~' + fmtTime(s.last_trip_completed_at) : fmtTime(s.signed_out_at)}</td>
+          <td class="mono text-right px-6 py-2.5 font-semibold">${s.min ? (s.kind === 'estimated' ? '~' : '') + hm(s.min) : '—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="px-6 py-4 text-[11.5px] text-gray-500">Vehicles this week: <span class="mono">${[...d.vehicles].join(', ') || '—'}</span></div>`;
+  document.getElementById('drawer').classList.remove('hidden');
+}
+document.querySelectorAll('#drawer [data-close]').forEach(b => b.addEventListener('click', () => document.getElementById('drawer').classList.add('hidden')));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.getElementById('drawer').classList.add('hidden'); document.getElementById('settings').classList.add('hidden'); } });
+
+/* ═════════ CSV ═════════ */
+function exportCsv() {
+  const { days, drivers } = aggregate(filtered());
+  const head = ['Brand', 'Driver ref', 'Driver name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'Needs review'];
+  const lines = [head, ...drivers.sort((a, b) => b.total - a.total).map(d => [
+    BRAND[d.brand].label, d.ref, d.name, ...days.map(day => hrs(d.perDay[day])), d.shifts, hrs(d.total), d.review,
+  ])].map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `shift-hours-${state.brand === 'all' ? 'dlx-dmt' : state.brand.toLowerCase()}-${state.weekStart}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ═════════ Errors ═════════ */
+function showError(msg) { const b = document.getElementById('errorBox'); b.textContent = msg; b.classList.remove('hidden'); }
+function hideError() { document.getElementById('errorBox').classList.add('hidden'); }
+
+/* ═════════ Wiring ═════════ */
+document.getElementById('wkPrev').onclick = () => { state.weekStart = addDays(state.weekStart, -7); state.shifts = []; load(); };
+document.getElementById('wkNext').onclick = () => { state.weekStart = addDays(state.weekStart, 7); state.shifts = []; load(); };
+document.getElementById('wkThis').onclick = () => { state.weekStart = weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart)); state.shifts = []; load(); };
+document.getElementById('btnRefresh').onclick = () => load();
+document.getElementById('btnCsv').onclick = exportCsv;
+document.getElementById('search').oninput = e => { state.search = e.target.value; render(); };
+document.getElementById('sortSel').onchange = e => { state.sort = e.target.value; render(); };
+document.querySelectorAll('#brandTabs .tab').forEach(t => t.addEventListener('click', () => { state.brand = t.dataset.brand; render(); }));
+
+document.getElementById('btnSettings').onclick = () => {
+  document.getElementById('setDlx').value = SETTINGS.dlx;
+  document.getElementById('setDmt').value = SETTINGS.dmt;
+  document.getElementById('setWeekStart').value = String(SETTINGS.weekStart);
+  document.getElementById('setOt').value = SETTINGS.ot;
+  document.getElementById('settings').classList.remove('hidden');
+};
+document.querySelectorAll('[data-close-settings]').forEach(b => b.addEventListener('click', () => document.getElementById('settings').classList.add('hidden')));
+document.getElementById('btnSaveSettings').onclick = () => {
+  SETTINGS = {
+    dlx: document.getElementById('setDlx').value.trim() || DEFAULTS.dlx,
+    dmt: document.getElementById('setDmt').value.trim() || DEFAULTS.dmt,
+    weekStart: Number(document.getElementById('setWeekStart').value),
+    ot: Number(document.getElementById('setOt').value) || DEFAULTS.ot,
+  };
+  saveSettings(SETTINGS);
+  state.weekStart = weekStartOf(state.weekStart, SETTINGS.weekStart);
+  document.getElementById('settings').classList.add('hidden');
+  state.shifts = [];
+  load();
+};
+
+// Refresh live elapsed time each minute, and re-pull data while viewing the current week
+setInterval(() => {
+  const cur = weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart));
+  if (state.weekStart === cur && !document.hidden) load();
+}, REFRESH_MS);
+
+load();
+</script>
+</body>
+</html>
