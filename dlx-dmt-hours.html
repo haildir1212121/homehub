@@ -105,6 +105,7 @@
             <option value="name">Sort · Name</option>
             <option value="shifts">Sort · Shifts</option>
           </select>
+          <button id="btnNoName" class="hidden h-8 px-2.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 text-[12px] font-medium items-center gap-1.5"><i class="ph-bold ph-user-focus"></i><span></span></button>
         </div>
       </div>
       <div class="overflow-x-auto custom-scroll">
@@ -159,12 +160,36 @@
     <div class="px-6 py-5 border-b border-gray-200 flex items-start gap-3">
       <div>
         <div class="eyebrow mb-1" id="dwEyebrow">—</div>
-        <div class="display-font text-[24px] font-semibold leading-tight" id="dwName">—</div>
+        <div class="flex items-center gap-2">
+          <div class="display-font text-[24px] font-semibold leading-tight" id="dwName">—</div>
+          <button id="dwRename" class="h-7 px-2 rounded-md border border-gray-200 hover:bg-gray-50 text-[11.5px] font-medium flex items-center gap-1"><i class="ph-bold ph-pencil-simple"></i>Edit name</button>
+        </div>
       </div>
       <button class="ml-auto h-8 w-8 rounded-md hover:bg-gray-100 flex items-center justify-center" data-close><i class="ph-bold ph-x"></i></button>
     </div>
     <div class="grid grid-cols-3 gap-px bg-gray-200 border-b border-gray-200" id="dwKpis"></div>
     <div class="flex-1 overflow-y-auto custom-scroll" id="dwBody"></div>
+  </div>
+</div>
+
+<!-- Rename modal -->
+<div id="rename" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div class="absolute inset-0 backdrop" data-close-rename></div>
+  <div class="relative w-full max-w-sm bg-white rounded-[10px] border border-gray-200 panel-enter">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <div class="eyebrow mb-1">Driver <span id="rnRef" class="text-gray-600">#</span> · Roster</div>
+      <div class="display-font text-[20px] font-semibold">Edit name.</div>
+    </div>
+    <div class="px-6 py-5">
+      <label class="th block mb-1.5">Full name</label>
+      <input id="rnInput" class="w-full h-9 px-3 rounded-md border border-gray-200 text-[13px] focus:outline-none focus:border-black" placeholder="First Last" autocomplete="off">
+      <p class="text-[11.5px] text-gray-500 mt-2">Saves to the driver roster — applies to every week and any tool using the driver directory.</p>
+      <div id="rnError" class="hidden mt-3 text-[12px] text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"></div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
+      <button class="h-9 px-3 rounded-md border border-gray-200 text-[12.5px] font-medium hover:bg-gray-50" data-close-rename>Cancel</button>
+      <button id="rnSave" class="h-9 px-3 rounded-md bg-black text-white text-[12.5px] font-medium hover:bg-gray-800 disabled:opacity-50">Save name</button>
+    </div>
   </div>
 </div>
 
@@ -240,6 +265,11 @@ function fmtTime(iso) { if (!iso) return '—'; return new Date(iso).toLocaleTim
 function fmtDateTime(iso) { if (!iso) return '—'; return new Date(iso).toLocaleString('en-US', { timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
 function hrs(min) { return (min / 60).toFixed(1); }
 function hm(min) { const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h}h ${String(m).padStart(2, '0')}m`; }
+function realName(n) {
+  const t = String(n ?? '').trim();
+  if (!t || /^#?\d+$/.test(t) || /^driver\s*#?\s*\d*$/i.test(t)) return '';
+  return t;
+}
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 /* ═════════ State ═════════ */
@@ -318,16 +348,20 @@ async function load() {
     }
     events.sort((a, b) => Date.parse(a.event_at) - Date.parse(b.event_at));
 
-    // Fill missing driver names from the directory
-    const noName = [...new Set(shifts.filter(s => !s.driver_name && s.driver_ref).map(s => String(s.driver_ref)))];
-    if (noName.length) {
-      const names = new Map();
-      for (let i = 0; i < noName.length; i += 100) {
-        const { data } = await sb.from('driver_directory').select('driver_ref,driver_name').in('driver_ref', noName.slice(i, i + 100));
-        (data || []).forEach(r => r.driver_name && names.set(String(r.driver_ref), r.driver_name));
-      }
-      shifts.forEach(s => { if (!s.driver_name) s.driver_name = names.get(String(s.driver_ref)) || ''; });
+    // Names: roster wins over what iCabbi sent on the shift; placeholders ("Driver #123", "123") count as missing
+    const refs = [...new Set(shifts.map(s => String(s.driver_ref)).filter(Boolean))];
+    state.roster = new Map();
+    for (let i = 0; i < refs.length; i += 100) {
+      const { data, error } = await sb.from('driver_roster').select('id,driver_ref,full_name').in('driver_ref', refs.slice(i, i + 100)).order('updated_at', { ascending: false });
+      if (error) throw error;
+      (data || []).forEach(r => { if (!state.roster.has(String(r.driver_ref))) state.roster.set(String(r.driver_ref), r); });
     }
+    const fromShifts = new Map();
+    shifts.forEach(s => { const n = realName(s.driver_name); if (n) fromShifts.set(String(s.driver_ref), n); });
+    shifts.forEach(s => {
+      const ref = String(s.driver_ref), r = state.roster.get(ref);
+      s.driver_name = realName(r && r.full_name) || fromShifts.get(ref) || '';
+    });
 
     state.shifts = attributeSites(shifts, events);
     state.lastSync = new Date();
@@ -415,6 +449,12 @@ function render() {
   const { days, drivers } = aggregate(shifts);
   const q = state.search.trim().toLowerCase();
   let rows = q ? drivers.filter(d => (d.name || '').toLowerCase().includes(q) || String(d.ref).includes(q)) : drivers;
+  const noNameCount = drivers.filter(d => !d.name).length;
+  const nnBtn = document.getElementById('btnNoName');
+  nnBtn.classList.toggle('hidden', !noNameCount && !state.noNameOnly);
+  nnBtn.classList.toggle('flex', !!(noNameCount || state.noNameOnly));
+  nnBtn.querySelector('span').textContent = state.noNameOnly ? 'Show all' : `${noNameCount} missing name${noNameCount === 1 ? '' : 's'}`;
+  if (state.noNameOnly) rows = rows.filter(d => !d.name);
   rows.sort(state.sort === 'name' ? (a, b) => (a.name || a.ref).localeCompare(b.name || b.ref)
           : state.sort === 'shifts' ? (a, b) => b.shifts - a.shifts || b.total - a.total
           : (a, b) => b.total - a.total);
@@ -467,7 +507,10 @@ function renderTable(days, rows) {
         <div class="flex items-center gap-2">
           ${d.live ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" title="On shift"></span>' : ''}
           <div class="min-w-0">
-            <div class="font-medium truncate max-w-[180px]">${esc(d.name || 'Driver ' + d.ref)}</div>
+            <div class="flex items-center gap-1.5 group/name">
+              <div class="font-medium truncate max-w-[180px] ${d.name ? '' : 'text-amber-700'}">${esc(d.name || 'No name')}</div>
+              <button class="rn-btn h-5 w-5 rounded flex items-center justify-center text-gray-400 hover:text-black hover:bg-gray-100 ${d.name ? 'opacity-0 group-hover/name:opacity-100' : ''}" data-ref="${esc(d.ref)}" title="Edit name"><i class="ph-bold ph-pencil-simple text-[12px]"></i></button>
+            </div>
             <div class="flex items-center gap-1.5 mt-0.5">
               <span class="mono text-[10.5px] text-gray-500">#${esc(d.ref)}</span>
               <span class="px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] ${BRAND[d.brand].chip}">${BRAND[d.brand].label}</span>
@@ -489,6 +532,7 @@ function renderTable(days, rows) {
     </tr>`;
   }).join('');
   tb.querySelectorAll('tr.row').forEach(tr => tr.addEventListener('click', () => openDriver(tr.dataset.key)));
+  tb.querySelectorAll('.rn-btn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openRename(b.dataset.ref); }));
 }
 
 function renderLive(shifts) {
@@ -498,7 +542,7 @@ function renderLive(shifts) {
     <div class="px-5 py-2.5 flex items-center gap-3">
       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
       <div class="min-w-0">
-        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'Driver ' + s.driver_ref)}</div>
+        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'No name · #' + s.driver_ref)}</div>
         <div class="mono text-[10.5px] text-gray-500">#${esc(s.driver_ref)} · Veh ${esc(s.vehicle_ref || '—')} · ${BRAND[s.brand].label} · in ${fmtTime(s.signed_in_at)}</div>
       </div>
       <div class="ml-auto mono text-[12px] font-semibold ${s.min > 12 * 60 ? 'text-[#D97757]' : ''}">${hm(s.min)}</div>
@@ -513,7 +557,7 @@ function renderReview(shifts) {
   document.getElementById('reviewList').innerHTML = rev.length ? rev.map(s => `
     <div class="px-5 py-2.5 cursor-pointer hover:bg-gray-50" data-key="${esc(s.brand + ':' + s.driver_ref)}">
       <div class="flex items-center gap-2">
-        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'Driver ' + s.driver_ref)}</div>
+        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'No name · #' + s.driver_ref)}</div>
         <span class="ml-auto px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] whitespace-nowrap ${tag[s.kind][1]}">${tag[s.kind][0]}</span>
       </div>
       <div class="mono text-[10.5px] text-gray-500 mt-0.5">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })} · Veh ${esc(s.vehicle_ref || '—')} · in ${fmtTime(s.signed_in_at)} · ${s.kind === 'estimated' ? 'last trip ' + fmtTime(s.last_trip_completed_at) : 'out ' + fmtDateTime(s.signed_out_at)}${s.min ? ' · ' + hm(s.min) : ''}</div>
@@ -528,7 +572,8 @@ function openDriver(key) {
   if (!d) return;
   const ot = Number(SETTINGS.ot) * 60;
   document.getElementById('dwEyebrow').textContent = `${BRAND[d.brand].label} · Driver #${d.ref}`;
-  document.getElementById('dwName').textContent = d.name || 'Driver ' + d.ref;
+  document.getElementById('dwName').textContent = d.name || 'No name';
+  document.getElementById('dwRename').onclick = () => openRename(d.ref);
   document.getElementById('dwKpis').innerHTML = [
     ['Week hours', hrs(d.total)], ['Shifts', d.shifts], ['To ' + SETTINGS.ot + 'h', d.total >= ot ? 'OT +' + hrs(d.total - ot) : hrs(ot - d.total)],
   ].map(([l, v]) => `<div class="bg-white px-5 py-3.5"><div class="eyebrow !text-[9px] mb-1">${l}</div><div class="display-font text-[22px] font-semibold mono">${v}</div></div>`).join('');
@@ -555,7 +600,48 @@ function openDriver(key) {
   document.getElementById('drawer').classList.remove('hidden');
 }
 document.querySelectorAll('#drawer [data-close]').forEach(b => b.addEventListener('click', () => document.getElementById('drawer').classList.add('hidden')));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.getElementById('drawer').classList.add('hidden'); document.getElementById('settings').classList.add('hidden'); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.getElementById('drawer').classList.add('hidden'); document.getElementById('settings').classList.add('hidden'); closeRename(); } });
+
+/* ═════════ Rename driver (writes driver_roster) ═════════ */
+let renameRef = null;
+function openRename(ref) {
+  renameRef = String(ref);
+  const cur = state.shifts.find(s => String(s.driver_ref) === renameRef);
+  document.getElementById('rnRef').textContent = '#' + renameRef;
+  document.getElementById('rnInput').value = (cur && cur.driver_name) || '';
+  document.getElementById('rnError').classList.add('hidden');
+  document.getElementById('rename').classList.remove('hidden');
+  setTimeout(() => document.getElementById('rnInput').focus(), 50);
+}
+function closeRename() { document.getElementById('rename').classList.add('hidden'); }
+async function saveRename() {
+  const name = document.getElementById('rnInput').value.trim().replace(/\s+/g, ' ');
+  const errEl = document.getElementById('rnError');
+  if (!realName(name)) { errEl.textContent = 'Enter a real name, not a number.'; errEl.classList.remove('hidden'); return; }
+  const btn = document.getElementById('rnSave'); btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const now = new Date().toISOString();
+    const existing = state.roster && state.roster.get(renameRef);
+    let res;
+    if (existing && existing.id) {
+      res = await sb.from('driver_roster').update({ full_name: name, updated_at: now, updated_by: 'shift-hours' }).eq('driver_ref', renameRef).select('id,driver_ref,full_name');
+    } else {
+      res = await sb.from('driver_roster').insert({ driver_ref: renameRef, full_name: name, active: true, source: 'shift-hours', updated_at: now, updated_by: 'shift-hours' }).select('id,driver_ref,full_name');
+    }
+    if (res.error) throw res.error;
+    if (res.data && res.data[0]) state.roster.set(renameRef, res.data[0]);
+    state.shifts.forEach(s => { if (String(s.driver_ref) === renameRef) s.driver_name = name; });
+    closeRename();
+    render();
+    if (!document.getElementById('drawer').classList.contains('hidden')) {
+      const brand = state.shifts.find(s => String(s.driver_ref) === renameRef)?.brand;
+      if (brand) openDriver(brand + ':' + renameRef);
+    }
+  } catch (e) {
+    errEl.textContent = 'Could not save — ' + (e.message || e); errEl.classList.remove('hidden');
+  }
+  btn.disabled = false; btn.textContent = 'Save name';
+}
 
 /* ═════════ CSV ═════════ */
 function exportCsv() {
@@ -585,6 +671,11 @@ document.getElementById('btnCsv').onclick = exportCsv;
 document.getElementById('search').oninput = e => { state.search = e.target.value; render(); };
 document.getElementById('sortSel').onchange = e => { state.sort = e.target.value; render(); };
 document.querySelectorAll('#brandTabs .tab').forEach(t => t.addEventListener('click', () => { state.brand = t.dataset.brand; render(); }));
+
+document.getElementById('btnNoName').onclick = () => { state.noNameOnly = !state.noNameOnly; render(); };
+document.querySelectorAll('[data-close-rename]').forEach(b => b.addEventListener('click', closeRename));
+document.getElementById('rnSave').onclick = saveRename;
+document.getElementById('rnInput').addEventListener('keydown', e => { if (e.key === 'Enter') saveRename(); });
 
 document.getElementById('btnSettings').onclick = () => {
   document.getElementById('setDlx').value = SETTINGS.dlx;
