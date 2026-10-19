@@ -150,7 +150,7 @@
   </div>
 
   <p class="mt-6 text-[11.5px] text-gray-500 leading-relaxed max-w-3xl">
-    Hours come from iCabbi sign-in / sign-out events. Shifts count toward the day they started. When a driver never signs out, the shift is auto-closed at the nightly timeout — those hours are counted only to the driver's last completed trip and marked <span class="mono">~</span>. Sign-outs with no matching sign-in count as zero.
+    Hours come from iCabbi sign-in / sign-out events. Shifts count toward the day they started. iCabbi often sends sign-ins and sign-outs twice — duplicates are merged so no time is counted twice. When a driver never signs out (or a sign-out arrives more than 16h after the sign-in), hours are counted only to their last completed trip in that 16h window and marked <span class="mono">~</span>; with no trips, the shift counts zero. Sign-outs with no matching sign-in count as zero. All of these show under Needs review.
   </p>
 </main>
 
@@ -406,8 +406,87 @@ function attributeSites(shifts, events) {
     }
     const brand = siteToBrand(site);
     if (!brand) continue;
-    const m = shiftMinutes(s, nowMs);
-    out.push({ ...s, site, brand, min: m.min, kind: m.kind, note: m.note });
+    out.push({ ...s, site, brand });
+  }
+  return sessionize(out, nowMs);
+}
+
+/* iCabbi often fires sign-in / sign-out twice, and the worker can write each copy as its
+   own driver_shifts row (open duplicates, "unmatched" sign-outs, overlapping shifts).
+   Rebuild real shifts per driver by walking their sign-ins and sign-outs in time order. */
+const DUP_SIGNIN_MIN = 30;    // a sign-in this soon after another, while still signed in, is a duplicate
+const DUP_SIGNOUT_MIN = 60;   // a sign-out this soon after a shift ended, with no sign-in between, is a duplicate
+function sessionize(rows, nowMs) {
+  const byDriver = new Map();
+  for (const r of rows) {
+    const k = String(r.driver_ref);
+    if (!byDriver.has(k)) byDriver.set(k, []);
+    byDriver.get(k).push(r);
+  }
+  const out = [];
+  for (const list of byDriver.values()) {
+    const ev = [];
+    for (const r of list) {
+      if (r.signed_in_at) ev.push({ t: Date.parse(r.signed_in_at), type: 'in', r });
+      if (r.signed_out_at) ev.push({ t: Date.parse(r.signed_out_at), type: r.status === 'signed_out_auto_timeout' ? 'timeout' : 'out', r });
+    }
+    ev.sort((a, b) => a.t - b.t || (a.type === 'in' ? -1 : 1));
+    let cur = null, lastClose = null;
+    const lastTripIn = (c, before) => {
+      let best = null;
+      for (const r of c.rows) {
+        const t = r.last_trip_completed_at ? Date.parse(r.last_trip_completed_at) : null;
+        if (t && t > c.start && t <= before && t - c.start <= LONG_SHIFT_MIN * 60000 && (!best || t > best)) best = t;
+      }
+      return best;
+    };
+    const emit = (c, endMs, kind, note) => {
+      const first = c.rows[0], last = c.rows[c.rows.length - 1];
+      let min = endMs ? Math.max(0, (endMs - c.start) / 60000) : 0;
+      if (kind === 'ok' && min > LONG_SHIFT_MIN) { kind = 'long'; note = `Over ${LONG_SHIFT_MIN / 60}h shift`; }
+      const dups = c.rows.length - 1;
+      out.push({ ...first, vehicle_ref: last.vehicle_ref || first.vehicle_ref,
+        signed_in_at: new Date(c.start).toISOString(),
+        signed_out_at: kind === 'ok' || kind === 'long' ? new Date(endMs).toISOString() : (c.outAt ? new Date(c.outAt).toISOString() : null),
+        last_trip_completed_at: kind === 'estimated' ? new Date(endMs).toISOString() : first.last_trip_completed_at,
+        min, kind, note, merged: dups });
+    };
+    for (const e of ev) {
+      if (e.type === 'in') {
+        if (cur && (e.t - cur.lastIn) / 60000 < DUP_SIGNIN_MIN) { cur.lastIn = e.t; if (!cur.rows.includes(e.r)) cur.rows.push(e.r); continue; }
+        if (cur) {
+          // previous shift never got a sign-out before this new sign-in
+          const lt = lastTripIn(cur, e.t);
+          if (lt) emit(cur, lt, 'estimated', 'No sign-out — counted to last trip');
+          else emit(cur, null, 'timeout', 'No sign-out and no trips — not counted');
+        }
+        cur = { start: e.t, lastIn: e.t, rows: [e.r] };
+      } else if (e.type === 'out') {
+        if (cur && (e.t - cur.start) / 60000 > LONG_SHIFT_MIN) {
+          // sign-out came too long after the sign-in to be the same shift: a sign-out (and a sign-in) were missed
+          const lt = lastTripIn(cur, e.t);
+          if (lt) emit(cur, lt, 'estimated', 'No sign-out — counted to last trip');
+          else emit(cur, null, 'timeout', 'No sign-out and no trips — not counted');
+          cur = null;
+          out.push({ ...e.r, signed_in_at: null, min: 0, kind: 'unmatched', note: 'Sign-out with no sign-in', merged: 0 }); lastClose = e.t;
+        }
+        else if (cur) { if (!cur.rows.includes(e.r)) cur.rows.push(e.r); emit(cur, e.t, 'ok', ''); cur = null; lastClose = e.t; }
+        else if (lastClose && (e.t - lastClose) / 60000 < DUP_SIGNOUT_MIN) { /* duplicate sign-out — ignore */ }
+        else { out.push({ ...e.r, signed_in_at: null, min: 0, kind: 'unmatched', note: 'Sign-out with no sign-in', merged: 0 }); lastClose = e.t; }
+      } else { // auto-timeout: only closes the shift this row belongs to
+        if (cur && cur.rows.includes(e.r)) {
+          cur.outAt = e.t;
+          const lt = lastTripIn(cur, e.t);
+          if (lt) emit(cur, lt, 'estimated', 'No sign-out — counted to last trip');
+          else emit(cur, null, 'timeout', 'No sign-out and no trips — not counted');
+          cur = null; lastClose = e.t;
+        }
+      }
+    }
+    if (cur) {
+      if (cur.rows.some(r => r.status === 'signed_in') && (nowMs - cur.start) / 60000 <= LONG_SHIFT_MIN) emit(cur, nowMs, 'live', 'On shift');
+      else { const lt = lastTripIn(cur, nowMs); lt ? emit(cur, lt, 'estimated', 'No sign-out — counted to last trip') : emit(cur, null, 'timeout', 'No sign-out and no trips — not counted'); }
+    }
   }
   return out;
 }
@@ -629,7 +708,7 @@ function openDriver(key) {
       </tr></thead>
       <tbody>${list.map(s => `
         <tr class="border-b border-gray-100 align-top">
-          <td class="px-6 py-2.5"><div class="mono">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })}</div>${label[s.kind] ? `<div class="text-[10.5px] ${s.kind === 'live' ? 'text-emerald-700' : 'text-amber-700'} mt-0.5">${label[s.kind]}</div>` : ''}</td>
+          <td class="px-6 py-2.5"><div class="mono">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })}</div>${label[s.kind] ? `<div class="text-[10.5px] ${s.kind === 'live' ? 'text-emerald-700' : 'text-amber-700'} mt-0.5">${label[s.kind]}</div>` : ''}${s.merged ? `<div class="text-[10.5px] text-gray-400 mt-0.5">${s.merged} duplicate sign-in${s.merged > 1 ? 's' : ''} merged</div>` : ''}</td>
           <td class="mono px-2 py-2.5">${esc(s.vehicle_ref || '—')}</td>
           <td class="mono px-2 py-2.5">${fmtTime(s.signed_in_at)}</td>
           <td class="mono px-2 py-2.5">${s.kind === 'live' ? '—' : s.kind === 'estimated' ? '~' + fmtTime(s.last_trip_completed_at) : fmtTime(s.signed_out_at)}</td>
