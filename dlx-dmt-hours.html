@@ -203,7 +203,6 @@ const PAGE = 1000;
 const REFRESH_MS = 60000;
 const LONG_SHIFT_MIN = 16 * 60;   // shifts longer than this are flagged
 const STALE_SYNC_MIN = 15;        // warn when the last good sync is older than this
-const NO_GROUP = 'g0';
 
 const DEFAULTS = { hiddenGroups: [], weekStart: 1, ot: 40, group: true };
 function loadSettings() {
@@ -219,11 +218,13 @@ const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE
 const CHIPS = { XDLX: 'bg-blue-50 text-blue-700', DLX: 'bg-blue-50 text-blue-700', DELUXE: 'bg-blue-50 text-blue-700',
   XDMT: 'bg-emerald-50 text-emerald-700', DMT: 'bg-emerald-50 text-emerald-700', XCC: 'bg-cyan-50 text-cyan-700', RBG: 'bg-amber-50 text-amber-700',
   XLB: 'bg-purple-50 text-purple-700', XSLM: 'bg-orange-50 text-orange-700', XGP: 'bg-red-50 text-red-700' };
-let GROUPS = [];        // [{ code: 'g123', id: 123, label: 'XDLX' }] — from qbt_groups
+// Group codes are "g:<company>:<group id>"; 0 = people with no group. One QuickBooks Time company per <company>.
+let GROUPS = [];        // [{ code, company, id, name, label }] — from qbt_groups
 let SITE_ORDER = [];    // groups that are shown (not hidden in settings)
+const gcode = (company, id) => `g:${company}:${id || 0}`;
 function groupInfo(code) {
-  const g = GROUPS.find(x => x.code === code) || { label: code === NO_GROUP ? 'No group' : code };
-  const key = String(g.label || '').trim().toUpperCase();
+  const g = GROUPS.find(x => x.code === code) || { name: code, label: code };
+  const key = String(g.name || '').trim().toUpperCase();
   return { label: g.label, name: g.label, chip: CHIPS[key] || CHIPS[key.split(/\s+/)[0]] || 'bg-gray-100 text-gray-700' };
 }
 const BRAND = new Proxy({}, { get: (_, code) => groupInfo(code) });
@@ -247,7 +248,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;
 const state = {
   weekStart: weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart)),
   brand: 'all', search: '', sort: 'hours',
-  shifts: [], loading: false, sync: null, everSynced: true,
+  shifts: [], loading: false, syncs: [], everSynced: true,
 };
 
 /* ═════════ Data ═════════ */
@@ -268,22 +269,30 @@ async function load() {
   const ws = state.weekStart, we = addDays(ws, 6);
   try {
     const [groups, users, sheets, sync] = await Promise.all([
-      fetchAll(() => sb.from('qbt_groups').select('id,name,active').order('name')),
-      fetchAll(() => sb.from('qbt_users').select('id,first_name,last_name,display_name,group_id,active,employee_number').order('id')),
+      fetchAll(() => sb.from('qbt_groups').select('company,id,name,active').order('company').order('name')),
+      fetchAll(() => sb.from('qbt_users').select('company,id,first_name,last_name,display_name,group_id,active,employee_number').order('company').order('id')),
       fetchAll(() => sb.from('qbt_timesheets')
-        .select('id,user_id,jobcode_type,type,date,start_at,end_at,duration_sec,on_the_clock')
+        .select('company,id,user_id,jobcode_type,type,date,start_at,end_at,duration_sec,on_the_clock')
         .gte('date', ws).lte('date', we).order('date')),
-      sb.from('qbt_sync_status').select('*').eq('id', 1).maybeSingle(),
+      sb.from('qbt_sync_status').select('company,label,last_run_at,last_ok_at,ok,message'),
     ]);
     if (sync.error) throw sync.error;
-    state.sync = sync.data;
-    state.everSynced = !!(sync.data && sync.data.last_ok_at);
+    state.syncs = sync.data || [];
+    state.everSynced = state.syncs.some(x => x.last_ok_at);
 
-    GROUPS = groups.map(g => ({ code: 'g' + g.id, id: g.id, label: g.name || `Group ${g.id}` }));
-    if (users.some(u => !u.group_id)) GROUPS.push({ code: NO_GROUP, id: 0, label: 'No group' });
+    // With more than one company, prefix group names with the company so "Drivers" in each stays distinct.
+    const companies = [...new Set([...groups, ...users].map(x => x.company))].sort();
+    const coLabel = c => (state.syncs.find(x => x.company === c) || {}).label || c.toUpperCase();
+    const multi = companies.length > 1;
+    const lbl = (c, name) => multi ? `${coLabel(c)} · ${name}` : name;
+    GROUPS = groups.map(g => ({ code: gcode(g.company, g.id), company: g.company, id: g.id, name: g.name || `Group ${g.id}`, label: lbl(g.company, g.name || `Group ${g.id}`) }));
+    for (const c of companies) {
+      if (users.some(u => u.company === c && !u.group_id)) GROUPS.push({ code: gcode(c, 0), company: c, id: 0, name: 'No group', label: lbl(c, 'No group') });
+    }
+    GROUPS.sort((a, b) => coLabel(a.company).localeCompare(coLabel(b.company)) || (a.id === 0) - (b.id === 0) || a.name.localeCompare(b.name));
     applyGroupFilter();
 
-    const byUser = new Map(users.map(u => [u.id, u]));
+    const byUser = new Map(users.map(u => [`${u.company}:${u.id}`, u]));
     state.shifts = toShifts(sheets, byUser);
     state.lastLoad = new Date();
   } catch (err) {
@@ -295,7 +304,8 @@ async function load() {
 }
 
 function applyGroupFilter() {
-  const hidden = new Set(SETTINGS.hiddenGroups || []);
+  // Settings saved before multi-company used "g<id>" for the main company; read those as main's groups.
+  const hidden = new Set((SETTINGS.hiddenGroups || []).map(c => { const m = /^g(\d+)$/.exec(c); return m ? gcode('main', +m[1]) : c; }));
   SITE_ORDER = GROUPS.filter(g => !hidden.has(g.code));
 }
 
@@ -311,15 +321,15 @@ function toShifts(sheets, byUser) {
   const out = [];
   for (const t of sheets) {
     if (t.jobcode_type === 'unpaid_break') continue;
-    const u = byUser.get(t.user_id);
-    const brand = u && u.group_id ? 'g' + u.group_id : NO_GROUP;
+    const u = byUser.get(`${t.company}:${t.user_id}`);
+    const brand = gcode(t.company, u && u.group_id);
     let min = Math.max(0, (t.duration_sec || 0) / 60), kind = 'ok', ptoMin = 0;
     if (t.jobcode_type === 'pto') { ptoMin = min; min = 0; kind = 'pto'; }
     else if (t.on_the_clock && t.start_at) { min = Math.max(0, (now - Date.parse(t.start_at)) / 60000); kind = min > LONG_SHIFT_MIN ? 'long' : 'live'; }
     else if (t.type === 'manual') { kind = 'manual'; }
     else if (min > LONG_SHIFT_MIN) { kind = 'long'; }
     out.push({
-      id: t.id, user_id: t.user_id, date: t.date, brand,
+      id: `${t.company}:${t.id}`, user_id: `${t.company}:${t.user_id}`, date: t.date, brand,
       ref: u && u.employee_number ? String(u.employee_number) : '',
       name: personName(u) || `QuickBooks Time user ${t.user_id}`,
       start_at: t.start_at, end_at: t.end_at, on_the_clock: !!t.on_the_clock,
@@ -391,22 +401,33 @@ function render() {
   renderReview(shifts);
 }
 
+/* One status row per QuickBooks Time company: the badge shows the oldest good sync, warnings name the company. */
 function renderSync() {
-  const s = state.sync, dot = document.getElementById('syncDot'), lbl = document.getElementById('lastSync'), stale = document.getElementById('staleBox');
-  let color = 'bg-gray-300', text = 'Not synced yet', warn = '';
-  if (s && s.last_ok_at) {
-    const minsOld = (Date.now() - Date.parse(s.last_ok_at)) / 60000;
-    text = 'QuickBooks Time · ' + ago(s.last_ok_at);
-    color = minsOld > STALE_SYNC_MIN ? 'bg-amber-500' : 'bg-emerald-500';
-    if (s.ok === false) { color = 'bg-red-500'; warn = `The last QuickBooks Time sync failed (${ago(s.last_run_at)}): ${s.message || 'unknown error'}. Showing data from ${ago(s.last_ok_at)}.`; }
-    else if (minsOld > STALE_SYNC_MIN) warn = `QuickBooks Time hasn't synced for ${ago(s.last_ok_at).replace(' ago', '')}. Numbers may be out of date — check the sync worker.`;
-  } else if (s && s.ok === false) {
-    color = 'bg-red-500'; text = 'Sync failing';
-    warn = `QuickBooks Time sync is failing: ${s.message || 'unknown error'}`;
+  const rows = state.syncs || [], dot = document.getElementById('syncDot'), lbl = document.getElementById('lastSync'), stale = document.getElementById('staleBox');
+  const name = r => rows.length > 1 ? `${r.label || r.company} ` : '';
+  const warns = [];
+  let color = 'bg-gray-300', text = 'Not synced yet';
+  const okRows = rows.filter(r => r.last_ok_at);
+  if (okRows.length) {
+    const oldest = okRows.reduce((a, b) => Date.parse(a.last_ok_at) < Date.parse(b.last_ok_at) ? a : b);
+    text = 'QuickBooks Time · ' + ago(oldest.last_ok_at);
+    color = 'bg-emerald-500';
   }
+  for (const r of rows) {
+    if (r.ok === false) {
+      warns.push(r.last_ok_at
+        ? `The last ${name(r)}QuickBooks Time sync failed (${ago(r.last_run_at)}): ${r.message || 'unknown error'}. Showing ${name(r)}data from ${ago(r.last_ok_at)}.`
+        : `${name(r)}QuickBooks Time sync is failing: ${r.message || 'unknown error'}`);
+      color = 'bg-red-500';
+    } else if (r.last_ok_at && (Date.now() - Date.parse(r.last_ok_at)) / 60000 > STALE_SYNC_MIN) {
+      warns.push(`${name(r)}QuickBooks Time hasn't synced for ${ago(r.last_ok_at).replace(' ago', '')}. Numbers may be out of date — check the sync worker.`);
+      if (color !== 'bg-red-500') color = 'bg-amber-500';
+    }
+  }
+  if (!okRows.length && warns.length) text = 'Sync failing';
   dot.className = `w-1.5 h-1.5 rounded-full ${color}`;
   lbl.textContent = text;
-  stale.textContent = warn; stale.classList.toggle('hidden', !warn || state.loading);
+  stale.textContent = warns.join(' '); stale.classList.toggle('hidden', !warns.length || state.loading);
 }
 
 function renderKpis(shifts, drivers) {
