@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shift Hours — Sites</title>
+<title>Shift Hours — QuickBooks Time</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -21,8 +21,6 @@
   .scrollbar-hide { scrollbar-width: none; }
   .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
   .custom-scroll::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
-  .fade-in { animation: fadeIn .2s ease-out; }
-  @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
   .panel-enter { animation: slideUp .2s ease-out; }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px) } to { opacity: 1; transform: none } }
   .backdrop { background: rgba(0,0,0,.3); backdrop-filter: blur(2px); }
@@ -46,7 +44,7 @@
       <span>Operations</span><i class="ph ph-caret-right text-[11px]"></i><span class="text-black font-medium">Shift Hours</span>
     </div>
     <div class="ml-auto flex items-center gap-2">
-      <span id="liveDot" class="hidden sm:flex items-center gap-1.5 eyebrow"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span><span id="lastSync">—</span></span>
+      <span id="syncBadge" class="hidden sm:flex items-center gap-1.5 eyebrow" title=""><span id="syncDot" class="w-1.5 h-1.5 rounded-full bg-gray-300"></span><span id="lastSync">—</span></span>
       <button id="btnRefresh" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12.5px] font-medium flex items-center gap-1.5"><i class="ph-bold ph-arrows-clockwise"></i><span class="hidden sm:inline">Refresh</span></button>
       <button id="btnCsv" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12.5px] font-medium flex items-center gap-1.5"><i class="ph-bold ph-download-simple"></i><span class="hidden sm:inline">Export CSV</span></button>
       <button id="btnSettings" class="h-8 w-8 rounded-md border border-gray-200 bg-white hover:bg-gray-50 flex items-center justify-center" title="Settings"><i class="ph-bold ph-gear-six"></i></button>
@@ -55,43 +53,39 @@
 </header>
 
 <main class="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
-  <!-- Title row -->
   <div class="flex flex-col lg:flex-row lg:items-end gap-4 mb-6">
     <div>
-      <div class="eyebrow mb-2">Operations · All sites · Sign-ins</div>
+      <div class="eyebrow mb-2">Operations · QuickBooks Time · Timesheets</div>
       <h1 class="display-font text-[32px] sm:text-[38px] font-semibold leading-none">Shift Hours.</h1>
-      <p class="text-[13px] text-gray-500 mt-2">Weekly sign-in hours per driver, by iCabbi site. Oregon Taxi (ORTX) stays on the owner portal.</p>
+      <p class="text-[13px] text-gray-500 mt-2">Weekly clocked hours per driver from QuickBooks Time, grouped by QuickBooks Time group.</p>
     </div>
     <div class="lg:ml-auto flex flex-wrap items-center gap-2">
       <div class="flex items-center rounded-md border border-gray-200 bg-white overflow-hidden">
         <button id="wkPrev" class="h-9 w-9 flex items-center justify-center hover:bg-gray-50 border-r border-gray-200"><i class="ph-bold ph-caret-left"></i></button>
-        <div class="px-3 text-center min-w-[190px]">
-          <div class="mono text-[12.5px] font-semibold" id="wkLabel">—</div>
-        </div>
+        <div class="px-3 text-center min-w-[190px]"><div class="mono text-[12.5px] font-semibold" id="wkLabel">—</div></div>
         <button id="wkNext" class="h-9 w-9 flex items-center justify-center hover:bg-gray-50 border-l border-gray-200"><i class="ph-bold ph-caret-right"></i></button>
       </div>
       <button id="wkThis" class="h-9 px-3 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12.5px] font-medium">This week</button>
     </div>
   </div>
 
-  <!-- Brand tabs -->
+  <!-- Group tabs -->
   <div class="flex items-end gap-4 border-b border-gray-200 mb-6">
     <div class="flex items-center gap-6 overflow-x-auto scrollbar-hide -mb-px" id="brandTabs"></div>
     <div class="ml-auto pb-2 hidden sm:block flex-shrink-0">
       <div class="relative">
         <i class="ph ph-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
-        <input id="search" placeholder="Driver or ref" class="h-8 pl-8 pr-3 w-52 rounded-md border border-gray-200 bg-white text-[12.5px] focus:outline-none focus:border-black">
+        <input id="search" placeholder="Driver or employee #" class="h-8 pl-8 pr-3 w-52 rounded-md border border-gray-200 bg-white text-[12.5px] focus:outline-none focus:border-black">
       </div>
     </div>
   </div>
 
   <div id="errorBox" class="hidden mb-6 rounded-lg border border-red-200 bg-red-50 text-red-700 text-[13px] px-4 py-3"></div>
+  <div id="staleBox" class="hidden mb-6 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[13px] px-4 py-3"></div>
 
-  <!-- KPIs -->
   <section class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-px bg-gray-200 border border-gray-200 rounded-lg overflow-hidden mb-6" id="kpis"></section>
 
   <div class="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
-    <!-- Weekly table -->
     <section class="card overflow-hidden">
       <div class="px-5 py-4 flex flex-wrap items-center gap-3 border-b border-gray-100">
         <div class="w-7 h-7 rounded-[4px] border border-gray-200 flex items-center justify-center"><i class="ph-bold ph-clock text-sm"></i></div>
@@ -105,31 +99,27 @@
             <option value="name">Sort · Name</option>
             <option value="shifts">Sort · Shifts</option>
           </select>
-          <button id="btnGroup" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12px] font-medium flex items-center gap-1.5" title="Group by site"><i class="ph-bold ph-stack"></i><span class="hidden sm:inline">Group by site</span></button>
-          <button id="btnNoName" class="hidden h-8 px-2.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 text-[12px] font-medium items-center gap-1.5"><i class="ph-bold ph-user-focus"></i><span></span></button>
+          <button id="btnGroup" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12px] font-medium flex items-center gap-1.5" title="Group by QuickBooks Time group"><i class="ph-bold ph-stack"></i><span class="hidden sm:inline">Grouped</span></button>
         </div>
       </div>
       <div class="overflow-x-auto custom-scroll">
         <table class="w-full text-[12.5px]">
-          <thead class="bg-gray-50/50 border-b border-gray-100">
-            <tr id="theadRow"></tr>
-          </thead>
+          <thead class="bg-gray-50/50 border-b border-gray-100"><tr id="theadRow"></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
       <div id="emptyState" class="hidden px-5 py-12 text-center">
-        <div class="text-[13px] font-medium">No sign-ins found</div>
-        <div class="text-[12px] text-gray-500 mt-1">No shifts for this site this week.</div>
+        <div class="text-[13px] font-medium" id="emptyTitle">No timesheets found</div>
+        <div class="text-[12px] text-gray-500 mt-1" id="emptyMsg">Nothing clocked for this group this week.</div>
       </div>
       <div id="loading" class="px-5 py-12 flex justify-center"><div class="spinner"></div></div>
     </section>
 
-    <!-- Side column -->
     <aside class="space-y-6">
       <section class="card overflow-hidden">
         <div class="px-5 py-4 flex items-center gap-3 border-b border-gray-100">
           <div class="w-7 h-7 rounded-[4px] border border-gray-200 flex items-center justify-center"><i class="ph-bold ph-steering-wheel text-sm"></i></div>
-          <div class="text-[13px] font-semibold">On shift now</div>
+          <div class="text-[13px] font-semibold">On the clock</div>
           <span class="ml-auto mono text-[11px] text-gray-500" id="liveCount">0</span>
         </div>
         <div id="liveList" class="divide-y divide-gray-100 max-h-[360px] overflow-y-auto custom-scroll"></div>
@@ -140,7 +130,7 @@
           <div class="w-7 h-7 rounded-[4px] border border-gray-200 flex items-center justify-center"><i class="ph-bold ph-warning text-sm"></i></div>
           <div>
             <div class="text-[13px] font-semibold">Needs review</div>
-            <div class="eyebrow !text-[9px]">Missed sign-outs · unmatched</div>
+            <div class="eyebrow !text-[9px]">Long shifts · manual entries</div>
           </div>
           <span class="ml-auto mono text-[11px] text-gray-500" id="reviewCount">0</span>
         </div>
@@ -150,7 +140,7 @@
   </div>
 
   <p class="mt-6 text-[11.5px] text-gray-500 leading-relaxed max-w-3xl">
-    Hours come from iCabbi sign-in / sign-out events. Shifts count toward the day they started. iCabbi often sends sign-ins and sign-outs twice — duplicates are merged so no time is counted twice. When a driver never signs out (or a sign-out arrives more than 16h after the sign-in), hours are counted only to their last completed trip in that 16h window and marked <span class="mono">~</span>; with no trips, the shift counts zero. Sign-outs with no matching sign-in count as zero. All of these show under Needs review.
+    Hours come from QuickBooks Time timesheets, copied every 5 minutes. Each timesheet counts toward its QuickBooks Time date. People still on the clock count up to now. Unpaid breaks and PTO are left out of the totals; PTO shows in a driver's detail. Shifts over 16h and manually entered time are listed under Needs review — fix them in QuickBooks Time and they update here on the next sync.
   </p>
 </main>
 
@@ -161,10 +151,7 @@
     <div class="px-6 py-5 border-b border-gray-200 flex items-start gap-3">
       <div>
         <div class="eyebrow mb-1" id="dwEyebrow">—</div>
-        <div class="flex items-center gap-2">
-          <div class="display-font text-[24px] font-semibold leading-tight" id="dwName">—</div>
-          <button id="dwRename" class="h-7 px-2 rounded-md border border-gray-200 hover:bg-gray-50 text-[11.5px] font-medium flex items-center gap-1"><i class="ph-bold ph-pencil-simple"></i>Edit name</button>
-        </div>
+        <div class="display-font text-[24px] font-semibold leading-tight" id="dwName">—</div>
       </div>
       <button class="ml-auto h-8 w-8 rounded-md hover:bg-gray-100 flex items-center justify-center" data-close><i class="ph-bold ph-x"></i></button>
     </div>
@@ -173,28 +160,7 @@
   </div>
 </div>
 
-<!-- Rename modal -->
-<div id="rename" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-  <div class="absolute inset-0 backdrop" data-close-rename></div>
-  <div class="relative w-full max-w-sm bg-white rounded-[10px] border border-gray-200 panel-enter">
-    <div class="px-6 py-4 border-b border-gray-100">
-      <div class="eyebrow mb-1">Driver <span id="rnRef" class="text-gray-600">#</span> · Roster</div>
-      <div class="display-font text-[20px] font-semibold">Edit name.</div>
-    </div>
-    <div class="px-6 py-5">
-      <label class="th block mb-1.5">Full name</label>
-      <input id="rnInput" class="w-full h-9 px-3 rounded-md border border-gray-200 text-[13px] focus:outline-none focus:border-black" placeholder="First Last" autocomplete="off">
-      <p class="text-[11.5px] text-gray-500 mt-2">Saves to the driver roster — applies to every week and any tool using the driver directory.</p>
-      <div id="rnError" class="hidden mt-3 text-[12px] text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"></div>
-    </div>
-    <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-      <button class="h-9 px-3 rounded-md border border-gray-200 text-[12.5px] font-medium hover:bg-gray-50" data-close-rename>Cancel</button>
-      <button id="rnSave" class="h-9 px-3 rounded-md bg-black text-white text-[12.5px] font-medium hover:bg-gray-800 disabled:opacity-50">Save name</button>
-    </div>
-  </div>
-</div>
-
-<!-- Settings modal -->
+<!-- Settings -->
 <div id="settings" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div class="absolute inset-0 backdrop" data-close-settings></div>
   <div class="relative w-full max-w-md bg-white rounded-[10px] border border-gray-200 panel-enter">
@@ -204,9 +170,9 @@
     </div>
     <div class="px-6 py-5 space-y-5 text-[13px]">
       <div>
-        <label class="th block mb-1.5">Site map · iCabbi driver_site_id = site</label>
-        <textarea id="setSites" rows="7" class="w-full px-3 py-2 rounded-md border border-gray-200 mono text-[12px] focus:outline-none focus:border-black" placeholder="57=XDLX Deluxe"></textarea>
-        <p class="text-[11.5px] text-gray-500 mt-1.5">One per line: <span class="mono">id=CODE Name</span>. Ids not listed are left out (ORTX 54 is excluded on purpose).</p>
+        <label class="th block mb-1.5">QuickBooks Time groups to show</label>
+        <div id="setGroups" class="max-h-56 overflow-y-auto custom-scroll border border-gray-200 rounded-md divide-y divide-gray-100"></div>
+        <p class="text-[11.5px] text-gray-500 mt-1.5">Untick office staff or anyone who isn't a driver. New groups show by default.</p>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -235,52 +201,45 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const TZ = 'America/Los_Angeles';
 const PAGE = 1000;
 const REFRESH_MS = 60000;
-const LONG_SHIFT_MIN = 16 * 60;   // any normal shift longer than this gets flagged
+const LONG_SHIFT_MIN = 16 * 60;   // shifts longer than this are flagged
+const STALE_SYNC_MIN = 15;        // warn when the last good sync is older than this
+const NO_GROUP = 'g0';
 
-const DEFAULT_SITES = '55=RBG Roseburg\n56=XCC Oregon Coast\n57=XDLX Deluxe\n58=XDMT DMT\n59=XGP Secure Transport\n60=XLB Albany / Salem\n61=XSLM Eastern Oregon';
-const DEFAULTS = { sites: DEFAULT_SITES, weekStart: 1, ot: 40, group: true };
+const DEFAULTS = { hiddenGroups: [], weekStart: 1, ot: 40, group: true };
 function loadSettings() {
-  try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('shifthours.settings') || '{}')); }
+  try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('shifthours.qbt.settings') || '{}')); }
   catch (e) { return { ...DEFAULTS }; }
 }
-function saveSettings(s) { try { localStorage.setItem('shifthours.settings', JSON.stringify(s)); } catch (e) {} }
+function saveSettings(s) { try { localStorage.setItem('shifthours.qbt.settings', JSON.stringify(s)); } catch (e) {} }
 let SETTINGS = loadSettings();
 
 const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-const CHIPS = { XDLX: 'bg-blue-50 text-blue-700', XDMT: 'bg-emerald-50 text-emerald-700', XCC: 'bg-cyan-50 text-cyan-700', RBG: 'bg-amber-50 text-amber-700', XLB: 'bg-purple-50 text-purple-700', XSLM: 'bg-orange-50 text-orange-700', XGP: 'bg-red-50 text-red-700' };
-let SITE_MAP = {}, SITE_ORDER = [];
-function parseSites() {
-  SITE_MAP = {}; SITE_ORDER = [];
-  String(SETTINGS.sites || DEFAULT_SITES).split(/\n|,/).forEach(line => {
-    const m = line.trim().match(/^(\d+)\s*=\s*([A-Za-z0-9_-]+)\s*(.*)$/);
-    if (!m) return;
-    const code = m[2].toUpperCase();
-    SITE_MAP[m[1]] = code;
-    if (!SITE_ORDER.find(x => x.code === code)) SITE_ORDER.push({ code, label: m[3].trim() || code });
-  });
+// Groups named after your sites get the same chip colours as before; anything else is grey.
+const CHIPS = { XDLX: 'bg-blue-50 text-blue-700', DLX: 'bg-blue-50 text-blue-700', DELUXE: 'bg-blue-50 text-blue-700',
+  XDMT: 'bg-emerald-50 text-emerald-700', DMT: 'bg-emerald-50 text-emerald-700', XCC: 'bg-cyan-50 text-cyan-700', RBG: 'bg-amber-50 text-amber-700',
+  XLB: 'bg-purple-50 text-purple-700', XSLM: 'bg-orange-50 text-orange-700', XGP: 'bg-red-50 text-red-700' };
+let GROUPS = [];        // [{ code: 'g123', id: 123, label: 'XDLX' }] — from qbt_groups
+let SITE_ORDER = [];    // groups that are shown (not hidden in settings)
+function groupInfo(code) {
+  const g = GROUPS.find(x => x.code === code) || { label: code === NO_GROUP ? 'No group' : code };
+  const key = String(g.label || '').trim().toUpperCase();
+  return { label: g.label, name: g.label, chip: CHIPS[key] || CHIPS[key.split(/\s+/)[0]] || 'bg-gray-100 text-gray-700' };
 }
-parseSites();
-function siteInfo(code) {
-  const s = SITE_ORDER.find(x => x.code === code);
-  return { label: code, name: s ? s.label : code, chip: CHIPS[code] || 'bg-gray-100 text-gray-700' };
-}
-const BRAND = new Proxy({}, { get: (_, code) => siteInfo(code) });
+const BRAND = new Proxy({}, { get: (_, code) => groupInfo(code) });
 
 /* ═════════ Date helpers (Pacific) ═════════ */
-function pstDateStr(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d); } // YYYY-MM-DD
+function pstDateStr(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d); }
 function addDays(ymd, n) { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 function dow(ymd) { return new Date(ymd + 'T12:00:00Z').getUTCDay(); }
 function weekStartOf(ymd, startDow) { const off = (dow(ymd) - startDow + 7) % 7; return addDays(ymd, -off); }
 function fmtDay(ymd, opts) { return new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', ...opts }); }
 function fmtTime(iso) { if (!iso) return '—'; return new Date(iso).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }); }
-function fmtDateTime(iso) { if (!iso) return '—'; return new Date(iso).toLocaleString('en-US', { timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
 function hrs(min) { return (min / 60).toFixed(1); }
 function hm(min) { const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h}h ${String(m).padStart(2, '0')}m`; }
-function realName(n) {
-  const t = String(n ?? '').trim();
-  if (!t || /^#?\d+$/.test(t) || /^driver\s*#?\s*\d*$/i.test(t)) return '';
-  return t;
+function ago(iso) {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
 }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
@@ -288,7 +247,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;
 const state = {
   weekStart: weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart)),
   brand: 'all', search: '', sort: 'hours',
-  shifts: [], drivers: [], loading: false,
+  shifts: [], loading: false, sync: null, everSynced: true,
 };
 
 /* ═════════ Data ═════════ */
@@ -303,216 +262,99 @@ async function fetchAll(build) {
   return out;
 }
 
-function siteToBrand(siteId) {
-  const s = String(siteId ?? '');
-  return SITE_MAP[s] || null;
-}
-
-/* Work out minutes for a shift and whether it needs review. */
-function shiftMinutes(s, nowMs) {
-  const inMs = s.signed_in_at ? Date.parse(s.signed_in_at) : null;
-  const outMs = s.signed_out_at ? Date.parse(s.signed_out_at) : null;
-  if (!inMs) return { min: 0, kind: 'unmatched', note: 'Sign-out with no sign-in' };
-  if (s.status === 'signed_in' && !outMs) return { min: Math.max(0, (nowMs - inMs) / 60000), kind: 'live', note: 'On shift' };
-  if (s.status === 'signed_out_auto_timeout') {
-    const last = s.last_trip_completed_at ? Date.parse(s.last_trip_completed_at) : null;
-    if (last && last > inMs && (!outMs || last <= outMs)) return { min: (last - inMs) / 60000, kind: 'estimated', note: 'No sign-out — counted to last trip' };
-    return { min: 0, kind: 'timeout', note: 'No sign-out and no trips — not counted' };
-  }
-  let min = outMs ? (outMs - inMs) / 60000 : (s.total_hours_min || 0);
-  min = Math.max(0, min);
-  if (min > LONG_SHIFT_MIN) return { min, kind: 'long', note: `Over ${LONG_SHIFT_MIN / 60}h shift` };
-  return { min, kind: 'ok', note: '' };
-}
-
 async function load() {
   if (!sb) { showError('Supabase client failed to load.'); return; }
-  state.loading = true; render();
-  hideError();
+  state.loading = true; render(); hideError();
   const ws = state.weekStart, we = addDays(ws, 6);
   try {
-    // 1) Shifts for the week (all sites; site comes from events)
-    const shifts = await fetchAll(() => sb.from('driver_shifts')
-      .select('id,driver_name,driver_ref,vehicle_ref,date,signed_in_at,signed_out_at,total_hours_min,status,last_trip_completed_at,last_trip_dropoff')
-      .gte('date', ws).lte('date', we).neq('status', 'expected').order('date'));
+    const [groups, users, sheets, sync] = await Promise.all([
+      fetchAll(() => sb.from('qbt_groups').select('id,name,active').order('name')),
+      fetchAll(() => sb.from('qbt_users').select('id,first_name,last_name,display_name,group_id,active,employee_number').order('id')),
+      fetchAll(() => sb.from('qbt_timesheets')
+        .select('id,user_id,jobcode_type,type,date,start_at,end_at,duration_sec,on_the_clock')
+        .gte('date', ws).lte('date', we).order('date')),
+      sb.from('qbt_sync_status').select('*').eq('id', 1).maybeSingle(),
+    ]);
+    if (sync.error) throw sync.error;
+    state.sync = sync.data;
+    state.everSynced = !!(sync.data && sync.data.last_ok_at);
 
-    // 2) Sign-in/out events with site id, from a lookback window through week end
-    const evFrom = addDays(ws, -45) + 'T00:00:00-08:00';
-    const evTo = addDays(we, 2) + 'T00:00:00-08:00';
-    const events = await fetchAll(() => sb.from('driver_shift_events')
-      .select('driver_ref,event_at,shift_id,site:raw->>driver_site_id')
-      .not('raw->>driver_site_id', 'is', null)
-      .gte('event_at', evFrom).lt('event_at', evTo).order('event_at'));
+    GROUPS = groups.map(g => ({ code: 'g' + g.id, id: g.id, label: g.name || `Group ${g.id}` }));
+    if (users.some(u => !u.group_id)) GROUPS.push({ code: NO_GROUP, id: 0, label: 'No group' });
+    applyGroupFilter();
 
-    // Drivers with shifts but no recent events: look back further
-    const seen = new Set(events.map(e => String(e.driver_ref)));
-    const missing = [...new Set(shifts.map(s => String(s.driver_ref)).filter(r => r && !seen.has(r)))];
-    for (let i = 0; i < missing.length; i += 100) {
-      const chunk = missing.slice(i, i + 100);
-      const more = await fetchAll(() => sb.from('driver_shift_events')
-        .select('driver_ref,event_at,shift_id,site:raw->>driver_site_id')
-        .not('raw->>driver_site_id', 'is', null)
-        .in('driver_ref', chunk).lt('event_at', evTo).order('event_at'));
-      events.push(...more);
-    }
-    events.sort((a, b) => Date.parse(a.event_at) - Date.parse(b.event_at));
-
-    // Names: roster wins over what iCabbi sent on the shift; placeholders ("Driver #123", "123") count as missing
-    const refs = [...new Set(shifts.map(s => String(s.driver_ref)).filter(Boolean))];
-    state.roster = new Map();
-    for (let i = 0; i < refs.length; i += 100) {
-      const { data, error } = await sb.from('driver_roster').select('id,driver_ref,full_name').in('driver_ref', refs.slice(i, i + 100)).order('updated_at', { ascending: false });
-      if (error) throw error;
-      (data || []).forEach(r => { if (!state.roster.has(String(r.driver_ref))) state.roster.set(String(r.driver_ref), r); });
-    }
-    const fromShifts = new Map();
-    shifts.forEach(s => { const n = realName(s.driver_name); if (n) fromShifts.set(String(s.driver_ref), n); });
-    shifts.forEach(s => {
-      const ref = String(s.driver_ref), r = state.roster.get(ref);
-      s.driver_name = realName(r && r.full_name) || fromShifts.get(ref) || '';
-    });
-
-    state.shifts = attributeSites(shifts, events);
-    state.lastSync = new Date();
+    const byUser = new Map(users.map(u => [u.id, u]));
+    state.shifts = toShifts(sheets, byUser);
+    state.lastLoad = new Date();
   } catch (err) {
     console.error(err);
-    showError('Could not load shifts — ' + (err.message || err));
+    showError('Could not load timesheets — ' + (err.message || err));
   }
   state.loading = false;
   render();
 }
 
-/* Give each shift the site the driver was signed into at the time. */
-function attributeSites(shifts, events) {
-  const byShift = new Map(), byDriver = new Map();
-  for (const e of events) {
-    if (!e.site || !/^\d+$/.test(e.site)) continue;
-    if (e.shift_id) byShift.set(e.shift_id, e.site);
-    const k = String(e.driver_ref);
-    if (!byDriver.has(k)) byDriver.set(k, []);
-    byDriver.get(k).push({ t: Date.parse(e.event_at), site: e.site });
-  }
-  const nowMs = Date.now();
-  const out = [];
-  for (const s of shifts) {
-    let site = byShift.get(s.id) || null;
-    if (!site) {
-      const list = byDriver.get(String(s.driver_ref)) || [];
-      const anchor = Date.parse(s.signed_in_at || s.signed_out_at || (s.date + 'T12:00:00-07:00')) + 5 * 60000;
-      let pick = null;
-      for (const ev of list) { if (ev.t <= anchor) pick = ev; else break; }
-      if (!pick && list.length) pick = list[0];
-      site = pick ? pick.site : null;
-    }
-    const brand = siteToBrand(site);
-    if (!brand) continue;
-    out.push({ ...s, site, brand });
-  }
-  return sessionize(out, nowMs);
+function applyGroupFilter() {
+  const hidden = new Set(SETTINGS.hiddenGroups || []);
+  SITE_ORDER = GROUPS.filter(g => !hidden.has(g.code));
 }
 
-/* iCabbi often fires sign-in / sign-out twice, and the worker can write each copy as its
-   own driver_shifts row (open duplicates, "unmatched" sign-outs, overlapping shifts).
-   Rebuild real shifts per driver by walking their sign-ins and sign-outs in time order. */
-const DUP_SIGNIN_MIN = 30;    // a sign-in this soon after another, while still signed in, is a duplicate
-const DUP_SIGNOUT_MIN = 60;   // a sign-out this soon after a shift ended, with no sign-in between, is a duplicate
-function sessionize(rows, nowMs) {
-  const byDriver = new Map();
-  for (const r of rows) {
-    const k = String(r.driver_ref);
-    if (!byDriver.has(k)) byDriver.set(k, []);
-    byDriver.get(k).push(r);
-  }
+function personName(u) {
+  if (!u) return '';
+  const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+  return full || (u.display_name || '').trim();
+}
+
+/* One timesheet = one shift. Breaks and PTO don't count toward worked hours. */
+function toShifts(sheets, byUser) {
+  const now = Date.now();
   const out = [];
-  for (const list of byDriver.values()) {
-    const ev = [];
-    for (const r of list) {
-      if (r.signed_in_at) ev.push({ t: Date.parse(r.signed_in_at), type: 'in', r });
-      if (r.signed_out_at) ev.push({ t: Date.parse(r.signed_out_at), type: r.status === 'signed_out_auto_timeout' ? 'timeout' : 'out', r });
-    }
-    ev.sort((a, b) => a.t - b.t || (a.type === 'in' ? -1 : 1));
-    let cur = null, lastClose = null;
-    const lastTripIn = (c, before) => {
-      let best = null;
-      for (const r of c.rows) {
-        const t = r.last_trip_completed_at ? Date.parse(r.last_trip_completed_at) : null;
-        if (t && t > c.start && t <= before && t - c.start <= LONG_SHIFT_MIN * 60000 && (!best || t > best)) best = t;
-      }
-      return best;
-    };
-    const emit = (c, endMs, kind, note) => {
-      const first = c.rows[0], last = c.rows[c.rows.length - 1];
-      let min = endMs ? Math.max(0, (endMs - c.start) / 60000) : 0;
-      if (kind === 'ok' && min > LONG_SHIFT_MIN) { kind = 'long'; note = `Over ${LONG_SHIFT_MIN / 60}h shift`; }
-      const dups = c.rows.length - 1;
-      out.push({ ...first, vehicle_ref: last.vehicle_ref || first.vehicle_ref,
-        signed_in_at: new Date(c.start).toISOString(),
-        signed_out_at: kind === 'ok' || kind === 'long' ? new Date(endMs).toISOString() : (c.outAt ? new Date(c.outAt).toISOString() : null),
-        last_trip_completed_at: kind === 'estimated' ? new Date(endMs).toISOString() : first.last_trip_completed_at,
-        min, kind, note, merged: dups });
-    };
-    for (const e of ev) {
-      if (e.type === 'in') {
-        if (cur && (e.t - cur.lastIn) / 60000 < DUP_SIGNIN_MIN) { cur.lastIn = e.t; if (!cur.rows.includes(e.r)) cur.rows.push(e.r); continue; }
-        if (cur) {
-          // previous shift never got a sign-out before this new sign-in
-          const lt = lastTripIn(cur, e.t);
-          if (lt) emit(cur, lt, 'estimated', 'No sign-out — counted to last trip');
-          else emit(cur, null, 'timeout', 'No sign-out and no trips — not counted');
-        }
-        cur = { start: e.t, lastIn: e.t, rows: [e.r] };
-      } else if (e.type === 'out') {
-        if (cur && (e.t - cur.start) / 60000 > LONG_SHIFT_MIN) {
-          // sign-out came too long after the sign-in to be the same shift: a sign-out (and a sign-in) were missed
-          const lt = lastTripIn(cur, e.t);
-          if (lt) emit(cur, lt, 'estimated', 'No sign-out — counted to last trip');
-          else emit(cur, null, 'timeout', 'No sign-out and no trips — not counted');
-          cur = null;
-          out.push({ ...e.r, signed_in_at: null, min: 0, kind: 'unmatched', note: 'Sign-out with no sign-in', merged: 0 }); lastClose = e.t;
-        }
-        else if (cur) { if (!cur.rows.includes(e.r)) cur.rows.push(e.r); emit(cur, e.t, 'ok', ''); cur = null; lastClose = e.t; }
-        else if (lastClose && (e.t - lastClose) / 60000 < DUP_SIGNOUT_MIN) { /* duplicate sign-out — ignore */ }
-        else { out.push({ ...e.r, signed_in_at: null, min: 0, kind: 'unmatched', note: 'Sign-out with no sign-in', merged: 0 }); lastClose = e.t; }
-      } else { // auto-timeout: only closes the shift this row belongs to
-        if (cur && cur.rows.includes(e.r)) {
-          cur.outAt = e.t;
-          const lt = lastTripIn(cur, e.t);
-          if (lt) emit(cur, lt, 'estimated', 'No sign-out — counted to last trip');
-          else emit(cur, null, 'timeout', 'No sign-out and no trips — not counted');
-          cur = null; lastClose = e.t;
-        }
-      }
-    }
-    if (cur) {
-      if (cur.rows.some(r => r.status === 'signed_in') && (nowMs - cur.start) / 60000 <= LONG_SHIFT_MIN) emit(cur, nowMs, 'live', 'On shift');
-      else { const lt = lastTripIn(cur, nowMs); lt ? emit(cur, lt, 'estimated', 'No sign-out — counted to last trip') : emit(cur, null, 'timeout', 'No sign-out and no trips — not counted'); }
-    }
+  for (const t of sheets) {
+    if (t.jobcode_type === 'unpaid_break') continue;
+    const u = byUser.get(t.user_id);
+    const brand = u && u.group_id ? 'g' + u.group_id : NO_GROUP;
+    let min = Math.max(0, (t.duration_sec || 0) / 60), kind = 'ok', ptoMin = 0;
+    if (t.jobcode_type === 'pto') { ptoMin = min; min = 0; kind = 'pto'; }
+    else if (t.on_the_clock && t.start_at) { min = Math.max(0, (now - Date.parse(t.start_at)) / 60000); kind = min > LONG_SHIFT_MIN ? 'long' : 'live'; }
+    else if (t.type === 'manual') { kind = 'manual'; }
+    else if (min > LONG_SHIFT_MIN) { kind = 'long'; }
+    out.push({
+      id: t.id, user_id: t.user_id, date: t.date, brand,
+      ref: u && u.employee_number ? String(u.employee_number) : '',
+      name: personName(u) || `QuickBooks Time user ${t.user_id}`,
+      start_at: t.start_at, end_at: t.end_at, on_the_clock: !!t.on_the_clock,
+      min, ptoMin, kind,
+    });
   }
   return out;
 }
+
+const REVIEW_KINDS = ['long', 'manual'];
 
 /* ═════════ Aggregation ═════════ */
 function aggregate(shifts) {
   const days = [...Array(7)].map((_, i) => addDays(state.weekStart, i));
   const map = new Map();
   for (const s of shifts) {
-    const key = s.brand + ':' + s.driver_ref;
-    if (!map.has(key)) map.set(key, { key, ref: s.driver_ref, name: s.driver_name || '', brand: s.brand, perDay: Object.fromEntries(days.map(d => [d, 0])), total: 0, shifts: 0, review: 0, live: false, list: [], vehicles: new Set() });
+    const key = s.brand + ':' + s.user_id;
+    if (!map.has(key)) map.set(key, { key, user_id: s.user_id, ref: s.ref, name: s.name, brand: s.brand, perDay: Object.fromEntries(days.map(d => [d, 0])), total: 0, pto: 0, shifts: 0, review: 0, live: false, list: [] });
     const d = map.get(key);
-    if (!d.name && s.driver_name) d.name = s.driver_name;
     if (s.date in d.perDay) d.perDay[s.date] += s.min;
-    d.total += s.min;
-    if (s.signed_in_at) d.shifts++;
-    if (['unmatched', 'timeout', 'estimated', 'long'].includes(s.kind)) d.review++;
-    if (s.kind === 'live') d.live = true;
-    if (s.vehicle_ref) d.vehicles.add(s.vehicle_ref);
+    d.total += s.min; d.pto += s.ptoMin;
+    if (s.kind !== 'pto') d.shifts++;
+    if (REVIEW_KINDS.includes(s.kind)) d.review++;
+    if (s.on_the_clock) d.live = true;
     d.list.push(s);
   }
   return { days, drivers: [...map.values()] };
 }
 
+function visibleShifts() {
+  const shown = new Set(SITE_ORDER.map(g => g.code));
+  return state.shifts.filter(s => shown.has(s.brand));
+}
 function filtered() {
-  let s = state.shifts;
+  let s = visibleShifts();
   if (state.brand !== 'all') s = s.filter(x => x.brand === state.brand);
   return s;
 }
@@ -521,32 +363,25 @@ function filtered() {
 function render() {
   const ws = state.weekStart, we = addDays(ws, 6);
   document.getElementById('wkLabel').textContent = `${fmtDay(ws, { month: 'short', day: 'numeric' })} – ${fmtDay(we, { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  document.getElementById('lastSync').textContent = state.lastSync ? 'Synced ' + state.lastSync.toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }) : '—';
   document.getElementById('loading').classList.toggle('hidden', !state.loading);
+  renderSync();
 
-  // site tabs (built from the site map; empty sites dimmed)
-  const allAgg = aggregate(state.shifts).drivers;
+  const allAgg = aggregate(visibleShifts()).drivers;
   const pending = state.loading && !state.shifts.length;
-  const tabDefs = [{ code: 'all', text: 'All', n: allAgg.length }, ...SITE_ORDER.map(s => ({ code: s.code, text: s.code, title: s.label, n: allAgg.filter(d => d.brand === s.code).length }))];
   if (state.brand !== 'all' && !SITE_ORDER.find(s => s.code === state.brand)) state.brand = 'all';
+  const tabDefs = [{ code: 'all', text: 'All', n: allAgg.length }, ...SITE_ORDER.map(s => ({ code: s.code, text: s.label, n: allAgg.filter(d => d.brand === s.code).length }))];
   document.getElementById('brandTabs').innerHTML = tabDefs.map(t => `
-    <button data-brand="${esc(t.code)}" title="${esc(t.title || '')}" class="tab ${t.code === state.brand ? 'active' : ''} pb-2.5 mono text-[11px] uppercase tracking-[0.12em] font-semibold whitespace-nowrap hover:text-black ${t.n || pending || t.code === state.brand ? 'text-gray-400' : 'text-gray-300'}">${esc(t.text)} <span class="text-gray-400 font-normal">${pending ? '' : t.n}</span></button>`).join('');
+    <button data-brand="${esc(t.code)}" class="tab ${t.code === state.brand ? 'active' : ''} pb-2.5 mono text-[11px] uppercase tracking-[0.12em] font-semibold whitespace-nowrap hover:text-black ${t.n || pending || t.code === state.brand ? 'text-gray-400' : 'text-gray-300'}">${esc(t.text)} <span class="text-gray-400 font-normal">${pending ? '' : t.n}</span></button>`).join('');
   document.querySelectorAll('#brandTabs .tab').forEach(t => t.addEventListener('click', () => { state.brand = t.dataset.brand; render(); }));
-  document.getElementById('btnGroup').classList.toggle('hidden', state.brand !== 'all');
-  document.getElementById('btnGroup').classList.toggle('flex', state.brand === 'all');
-  document.getElementById('btnGroup').classList.toggle('!border-black', !!SETTINGS.group);
+  const gb = document.getElementById('btnGroup');
+  gb.classList.toggle('hidden', state.brand !== 'all'); gb.classList.toggle('flex', state.brand === 'all');
+  gb.classList.toggle('!border-black', !!SETTINGS.group);
 
   const shifts = filtered();
   const { days, drivers } = aggregate(shifts);
   const q = state.search.trim().toLowerCase();
-  let rows = q ? drivers.filter(d => (d.name || '').toLowerCase().includes(q) || String(d.ref).includes(q)) : drivers;
-  const noNameCount = drivers.filter(d => !d.name).length;
-  const nnBtn = document.getElementById('btnNoName');
-  nnBtn.classList.toggle('hidden', !noNameCount && !state.noNameOnly);
-  nnBtn.classList.toggle('flex', !!(noNameCount || state.noNameOnly));
-  nnBtn.querySelector('span').textContent = state.noNameOnly ? 'Show all' : `${noNameCount} missing name${noNameCount === 1 ? '' : 's'}`;
-  if (state.noNameOnly) rows = rows.filter(d => !d.name);
-  rows.sort(state.sort === 'name' ? (a, b) => (a.name || a.ref).localeCompare(b.name || b.ref)
+  const rows = q ? drivers.filter(d => d.name.toLowerCase().includes(q) || d.ref.includes(q)) : drivers;
+  rows.sort(state.sort === 'name' ? (a, b) => a.name.localeCompare(b.name)
           : state.sort === 'shifts' ? (a, b) => b.shifts - a.shifts || b.total - a.total
           : (a, b) => b.total - a.total);
 
@@ -556,24 +391,45 @@ function render() {
   renderReview(shifts);
 }
 
+function renderSync() {
+  const s = state.sync, dot = document.getElementById('syncDot'), lbl = document.getElementById('lastSync'), stale = document.getElementById('staleBox');
+  let color = 'bg-gray-300', text = 'Not synced yet', warn = '';
+  if (s && s.last_ok_at) {
+    const minsOld = (Date.now() - Date.parse(s.last_ok_at)) / 60000;
+    text = 'QuickBooks Time · ' + ago(s.last_ok_at);
+    color = minsOld > STALE_SYNC_MIN ? 'bg-amber-500' : 'bg-emerald-500';
+    if (s.ok === false) { color = 'bg-red-500'; warn = `The last QuickBooks Time sync failed (${ago(s.last_run_at)}): ${s.message || 'unknown error'}. Showing data from ${ago(s.last_ok_at)}.`; }
+    else if (minsOld > STALE_SYNC_MIN) warn = `QuickBooks Time hasn't synced for ${ago(s.last_ok_at).replace(' ago', '')}. Numbers may be out of date — check the sync worker.`;
+  } else if (s && s.ok === false) {
+    color = 'bg-red-500'; text = 'Sync failing';
+    warn = `QuickBooks Time sync is failing: ${s.message || 'unknown error'}`;
+  }
+  dot.className = `w-1.5 h-1.5 rounded-full ${color}`;
+  lbl.textContent = text;
+  stale.textContent = warn; stale.classList.toggle('hidden', !warn || state.loading);
+}
+
 function renderKpis(shifts, drivers) {
   const ot = Number(SETTINGS.ot) * 60;
   const total = drivers.reduce((a, d) => a + d.total, 0);
-  const signedShifts = shifts.filter(s => s.signed_in_at).length;
   const k = [
-    ['Drivers', drivers.length, 'signed in this week'],
-    ['Shifts', signedShifts, 'with a sign-in'],
+    ['Drivers', drivers.length, 'clocked in this week'],
+    ['Shifts', shifts.filter(s => s.kind !== 'pto').length, 'timesheets'],
     ['Total hours', hrs(total), 'all drivers'],
     ['Avg / driver', drivers.length ? hrs(total / drivers.length) : '0.0', 'hours'],
     [`${SETTINGS.ot}h+`, drivers.filter(d => d.total >= ot).length, `near: ${drivers.filter(d => d.total >= ot - 240 && d.total < ot).length}`],
-    ['Needs review', shifts.filter(s => ['unmatched', 'timeout', 'estimated', 'long'].includes(s.kind)).length, 'shifts'],
+    ['Needs review', shifts.filter(s => REVIEW_KINDS.includes(s.kind)).length, 'timesheets'],
   ];
   document.getElementById('kpis').innerHTML = k.map(([l, v, sub], i) => `
     <div class="bg-white px-5 py-4">
       <div class="eyebrow !text-[9px] mb-2">${String(i + 1).padStart(2, '0')} · ${esc(l)}</div>
-      <div class="display-font text-[28px] font-semibold leading-none mono-num ${i === 4 && Number(v) > 0 ? 'text-[#D97757]' : ''}">${esc(v)}</div>
+      <div class="display-font text-[28px] font-semibold leading-none ${i === 4 && Number(v) > 0 ? 'text-[#D97757]' : ''}">${esc(v)}</div>
       <div class="text-[11px] text-gray-500 mt-1.5">${esc(sub)}</div>
     </div>`).join('');
+}
+
+function chip(code, extra = '') {
+  return `<span class="px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] whitespace-nowrap ${BRAND[code].chip} ${extra}">${esc(BRAND[code].label)}</span>`;
 }
 
 function renderTable(days, rows) {
@@ -584,11 +440,15 @@ function renderTable(days, rows) {
     ${days.map(d => `<th class="th text-right px-2.5 py-2.5 ${d === today ? '!text-black' : ''}">${fmtDay(d, { weekday: 'short' })}<div class="font-normal normal-case tracking-normal">${fmtDay(d, { month: 'numeric', day: 'numeric' })}</div></th>`).join('')}
     <th class="th text-right px-2.5 py-2.5">Shifts</th>
     <th class="th text-right px-5 py-2.5 min-w-[130px]">Week total</th>`;
-  const meta = document.getElementById('tableMeta');
-  meta.textContent = `${rows.length} drivers · OT line ${SETTINGS.ot}h · Week starts ${Number(SETTINGS.weekStart) === 1 ? 'Mon' : 'Sun'}`;
+  document.getElementById('tableMeta').textContent = `${rows.length} drivers · OT line ${SETTINGS.ot}h · Week starts ${Number(SETTINGS.weekStart) === 1 ? 'Mon' : 'Sun'}`;
 
   const tb = document.getElementById('tbody');
-  document.getElementById('emptyState').classList.toggle('hidden', state.loading || rows.length > 0);
+  const empty = !state.loading && rows.length === 0;
+  document.getElementById('emptyState').classList.toggle('hidden', !empty);
+  if (empty) {
+    document.getElementById('emptyTitle').textContent = state.everSynced ? 'No timesheets found' : 'Waiting for the first QuickBooks Time sync';
+    document.getElementById('emptyMsg').textContent = state.everSynced ? 'Nothing clocked for this group this week.' : 'Once the sync worker runs, timesheets appear here automatically.';
+  }
   if (state.loading && !state.shifts.length) { tb.innerHTML = ''; return; }
   const grouped = state.brand === 'all' && SETTINGS.group;
   const rowHtml = d => {
@@ -597,25 +457,18 @@ function renderTable(days, rows) {
     return `<tr class="row border-b border-gray-100 cursor-pointer" data-key="${esc(d.key)}">
       <td class="px-5 py-2.5 sticky left-0 bg-white">
         <div class="flex items-center gap-2">
-          ${d.live ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" title="On shift"></span>' : ''}
+          ${d.live ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" title="On the clock"></span>' : ''}
           <div class="min-w-0">
-            <div class="flex items-center gap-1.5 group/name">
-              <div class="font-medium truncate max-w-[180px] ${d.name ? '' : 'text-amber-700'}">${esc(d.name || 'No name')}</div>
-              <button class="rn-btn h-5 w-5 rounded flex items-center justify-center text-gray-400 hover:text-black hover:bg-gray-100 ${d.name ? 'opacity-0 group-hover/name:opacity-100' : ''}" data-ref="${esc(d.ref)}" title="Edit name"><i class="ph-bold ph-pencil-simple text-[12px]"></i></button>
-            </div>
+            <div class="font-medium truncate max-w-[200px]">${esc(d.name)}</div>
             <div class="flex items-center gap-1.5 mt-0.5">
-              <span class="mono text-[10.5px] text-gray-500">#${esc(d.ref)}</span>
-              <span class="px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] ${BRAND[d.brand].chip}">${BRAND[d.brand].label}</span>
-              ${d.review ? `<span class="px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] bg-amber-50 text-amber-700">${d.review} review</span>` : ''}
+              ${d.ref ? `<span class="mono text-[10.5px] text-gray-500">#${esc(d.ref)}</span>` : ''}
+              ${chip(d.brand)}
+              ${d.review ? `<span class="px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] whitespace-nowrap bg-amber-50 text-amber-700">${d.review} review</span>` : ''}
             </div>
           </div>
         </div>
       </td>
-      ${days.map(day => {
-        const m = d.perDay[day];
-        const est = d.list.some(s => s.date === day && s.kind === 'estimated');
-        return `<td class="mono text-right px-2.5 py-2.5 ${m ? '' : 'cell-0'}">${m ? (est ? '~' : '') + hrs(m) : '—'}</td>`;
-      }).join('')}
+      ${days.map(day => { const m = d.perDay[day]; return `<td class="mono text-right px-2.5 py-2.5 ${m ? '' : 'cell-0'}">${m ? hrs(m) : '—'}</td>`; }).join('')}
       <td class="mono text-right px-2.5 py-2.5 text-gray-600">${d.shifts}</td>
       <td class="px-5 py-2.5">
         <div class="mono text-right font-semibold ${isOt ? 'text-[#D97757]' : ''}">${hrs(d.total)}<span class="text-gray-400 font-normal"> h</span></div>
@@ -639,9 +492,8 @@ function renderTable(days, rows) {
           <div class="flex items-center gap-2">
             <i class="ph-bold ${closed ? 'ph-caret-right' : 'ph-caret-down'} text-[11px] text-gray-500"></i>
             <span class="w-1 h-4 rounded-sm bg-black"></span>
-            <span class="px-1.5 py-px rounded-[4px] mono text-[9.5px] uppercase tracking-[0.1em] font-semibold ${BRAND[site.code].chip}">${esc(site.code)}</span>
-            <span class="text-[12.5px] font-semibold">${esc(site.label)}</span>
-            <span class="mono text-[10.5px] text-gray-500">${g.length} drv${otN ? ` · <span class="text-[#D97757]">${otN} over ${SETTINGS.ot}h</span>` : ''}</span>
+            ${chip(site.code, 'font-semibold !text-[9.5px]')}
+            <span class="mono text-[10.5px] text-gray-500 whitespace-nowrap">${g.length} drv${otN ? ` · <span class="text-[#D97757]">${otN} over ${SETTINGS.ot}h</span>` : ''}</span>
           </div>
         </td>
         ${perDay.map(m => `<td class="mono text-right px-2.5 py-2.5 text-[11.5px] ${m ? 'text-gray-600' : 'cell-0'}">${m ? hrs(m) : '—'}</td>`).join('')}
@@ -652,128 +504,85 @@ function renderTable(days, rows) {
     tb.querySelectorAll('tr.grp').forEach(tr => tr.addEventListener('click', () => { state.collapsed[tr.dataset.site] = !state.collapsed[tr.dataset.site]; render(); }));
   }
   tb.querySelectorAll('tr.row').forEach(tr => tr.addEventListener('click', () => openDriver(tr.dataset.key)));
-  tb.querySelectorAll('.rn-btn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openRename(b.dataset.ref); }));
 }
 
 function renderLive(shifts) {
-  const live = shifts.filter(s => s.kind === 'live').sort((a, b) => b.min - a.min);
+  const live = shifts.filter(s => s.on_the_clock).sort((a, b) => b.min - a.min);
   document.getElementById('liveCount').textContent = live.length;
+  const thisWeek = state.weekStart === weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart));
   document.getElementById('liveList').innerHTML = live.length ? live.map(s => `
-    <div class="px-5 py-2.5 flex items-center gap-3">
-      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+    <div class="px-5 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50" data-key="${esc(s.brand + ':' + s.user_id)}">
+      <span class="w-1.5 h-1.5 rounded-full ${s.kind === 'long' ? 'bg-amber-500' : 'bg-emerald-500'}"></span>
       <div class="min-w-0">
-        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'No name · #' + s.driver_ref)}</div>
-        <div class="mono text-[10.5px] text-gray-500">#${esc(s.driver_ref)} · Veh ${esc(s.vehicle_ref || '—')} · ${BRAND[s.brand].label} · in ${fmtTime(s.signed_in_at)}</div>
+        <div class="text-[12.5px] font-medium truncate">${esc(s.name)}</div>
+        <div class="mono text-[10.5px] text-gray-500">${s.ref ? '#' + esc(s.ref) + ' · ' : ''}${esc(BRAND[s.brand].label)} · in ${fmtTime(s.start_at)}</div>
       </div>
       <div class="ml-auto mono text-[12px] font-semibold ${s.min > 12 * 60 ? 'text-[#D97757]' : ''}">${hm(s.min)}</div>
-    </div>`).join('') : `<div class="px-5 py-6 text-[12px] text-gray-500">No one signed in — ${state.weekStart === weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart)) ? 'all quiet.' : 'past week.'}</div>`;
+    </div>`).join('') : `<div class="px-5 py-6 text-[12px] text-gray-500">No one on the clock — ${thisWeek ? 'all quiet.' : 'past week.'}</div>`;
+  document.querySelectorAll('#liveList [data-key]').forEach(el => el.addEventListener('click', () => openDriver(el.dataset.key)));
 }
 
 function renderReview(shifts) {
-  const rev = shifts.filter(s => ['unmatched', 'timeout', 'estimated', 'long'].includes(s.kind))
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const rev = shifts.filter(s => REVIEW_KINDS.includes(s.kind)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   document.getElementById('reviewCount').textContent = rev.length;
-  const tag = { unmatched: ['No sign-in', 'bg-red-50 text-red-700'], timeout: ['No sign-out', 'bg-red-50 text-red-700'], estimated: ['Est. to last trip', 'bg-amber-50 text-amber-700'], long: ['Long shift', 'bg-amber-50 text-amber-700'] };
+  const tag = { long: ['Long shift', 'bg-amber-50 text-amber-700'], manual: ['Manual entry', 'bg-blue-50 text-blue-700'] };
   document.getElementById('reviewList').innerHTML = rev.length ? rev.map(s => `
-    <div class="px-5 py-2.5 cursor-pointer hover:bg-gray-50" data-key="${esc(s.brand + ':' + s.driver_ref)}">
+    <div class="px-5 py-2.5 cursor-pointer hover:bg-gray-50" data-key="${esc(s.brand + ':' + s.user_id)}">
       <div class="flex items-center gap-2">
-        <div class="text-[12.5px] font-medium truncate">${esc(s.driver_name || 'No name · #' + s.driver_ref)}</div>
+        <div class="text-[12.5px] font-medium truncate">${esc(s.name)}</div>
         <span class="ml-auto px-1.5 py-px rounded-[4px] mono text-[9px] uppercase tracking-[0.1em] whitespace-nowrap ${tag[s.kind][1]}">${tag[s.kind][0]}</span>
       </div>
-      <div class="mono text-[10.5px] text-gray-500 mt-0.5">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })} · Veh ${esc(s.vehicle_ref || '—')} · in ${fmtTime(s.signed_in_at)} · ${s.kind === 'estimated' ? 'last trip ' + fmtTime(s.last_trip_completed_at) : 'out ' + fmtDateTime(s.signed_out_at)}${s.min ? ' · ' + hm(s.min) : ''}</div>
-    </div>`).join('') : '<div class="px-5 py-6 text-[12px] text-gray-500">All shifts closed cleanly.</div>';
+      <div class="mono text-[10.5px] text-gray-500 mt-0.5">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })}${s.start_at ? ' · in ' + fmtTime(s.start_at) : ''}${s.on_the_clock ? ' · still on the clock' : s.end_at ? ' · out ' + fmtTime(s.end_at) : ''} · ${hm(s.min)}</div>
+    </div>`).join('') : '<div class="px-5 py-6 text-[12px] text-gray-500">Nothing to review.</div>';
   document.querySelectorAll('#reviewList [data-key]').forEach(el => el.addEventListener('click', () => openDriver(el.dataset.key)));
 }
 
 /* ═════════ Drawer ═════════ */
 function openDriver(key) {
-  const { drivers } = aggregate(state.shifts);
-  const d = drivers.find(x => x.key === key);
+  const d = aggregate(visibleShifts()).drivers.find(x => x.key === key);
   if (!d) return;
   const ot = Number(SETTINGS.ot) * 60;
-  document.getElementById('dwEyebrow').textContent = `${BRAND[d.brand].label} · Driver #${d.ref}`;
-  document.getElementById('dwName').textContent = d.name || 'No name';
-  document.getElementById('dwRename').onclick = () => openRename(d.ref);
+  document.getElementById('dwEyebrow').textContent = `${BRAND[d.brand].label}${d.ref ? ' · Employee #' + d.ref : ''}`;
+  document.getElementById('dwName').textContent = d.name;
   document.getElementById('dwKpis').innerHTML = [
     ['Week hours', hrs(d.total)], ['Shifts', d.shifts], ['To ' + SETTINGS.ot + 'h', d.total >= ot ? 'OT +' + hrs(d.total - ot) : hrs(ot - d.total)],
   ].map(([l, v]) => `<div class="bg-white px-5 py-3.5"><div class="eyebrow !text-[9px] mb-1">${l}</div><div class="display-font text-[22px] font-semibold mono">${v}</div></div>`).join('');
-  const list = [...d.list].sort((a, b) => Date.parse(a.signed_in_at || a.signed_out_at) - Date.parse(b.signed_in_at || b.signed_out_at));
-  const label = { ok: '', live: 'On shift', estimated: 'Est. to last trip', timeout: 'No sign-out', unmatched: 'No sign-in', long: 'Long shift' };
+  const list = [...d.list].sort((a, b) => (a.date + (a.start_at || '')).localeCompare(b.date + (b.start_at || '')));
+  const label = { live: ['On the clock', 'text-emerald-700'], long: ['Long shift', 'text-amber-700'], manual: ['Manual entry', 'text-blue-700'], pto: ['PTO — not counted', 'text-gray-500'] };
   document.getElementById('dwBody').innerHTML = `
-    <div class="px-6 pt-5 pb-2 eyebrow">Shifts · ${list.length}</div>
+    <div class="px-6 pt-5 pb-2 eyebrow">Timesheets · ${list.length}</div>
     <table class="w-full text-[12.5px]">
       <thead class="border-y border-gray-100 bg-gray-50/50"><tr>
-        <th class="th text-left px-6 py-2">Date</th><th class="th text-left px-2 py-2">Veh</th>
-        <th class="th text-left px-2 py-2">In</th><th class="th text-left px-2 py-2">Out</th><th class="th text-right px-6 py-2">Hours</th>
+        <th class="th text-left px-6 py-2">Date</th><th class="th text-left px-2 py-2">In</th><th class="th text-left px-2 py-2">Out</th><th class="th text-right px-6 py-2">Hours</th>
       </tr></thead>
       <tbody>${list.map(s => `
         <tr class="border-b border-gray-100 align-top">
-          <td class="px-6 py-2.5"><div class="mono">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })}</div>${label[s.kind] ? `<div class="text-[10.5px] ${s.kind === 'live' ? 'text-emerald-700' : 'text-amber-700'} mt-0.5">${label[s.kind]}</div>` : ''}${s.merged ? `<div class="text-[10.5px] text-gray-400 mt-0.5">${s.merged} duplicate sign-in${s.merged > 1 ? 's' : ''} merged</div>` : ''}</td>
-          <td class="mono px-2 py-2.5">${esc(s.vehicle_ref || '—')}</td>
-          <td class="mono px-2 py-2.5">${fmtTime(s.signed_in_at)}</td>
-          <td class="mono px-2 py-2.5">${s.kind === 'live' ? '—' : s.kind === 'estimated' ? '~' + fmtTime(s.last_trip_completed_at) : fmtTime(s.signed_out_at)}</td>
-          <td class="mono text-right px-6 py-2.5 font-semibold">${s.min ? (s.kind === 'estimated' ? '~' : '') + hm(s.min) : '—'}</td>
+          <td class="px-6 py-2.5"><div class="mono">${fmtDay(s.date, { weekday: 'short', month: 'numeric', day: 'numeric' })}</div>${label[s.kind] ? `<div class="text-[10.5px] ${label[s.kind][1]} mt-0.5">${label[s.kind][0]}</div>` : ''}</td>
+          <td class="mono px-2 py-2.5">${s.start_at ? fmtTime(s.start_at) : '—'}</td>
+          <td class="mono px-2 py-2.5">${s.on_the_clock ? '—' : s.end_at ? fmtTime(s.end_at) : '—'}</td>
+          <td class="mono text-right px-6 py-2.5 font-semibold ${s.kind === 'pto' ? 'text-gray-400' : ''}">${s.kind === 'pto' ? hm(s.ptoMin) : s.min ? hm(s.min) : '—'}</td>
         </tr>`).join('')}
       </tbody>
     </table>
-    <div class="px-6 py-4 text-[11.5px] text-gray-500">Vehicles this week: <span class="mono">${[...d.vehicles].join(', ') || '—'}</span></div>`;
+    ${d.pto ? `<div class="px-6 py-4 text-[11.5px] text-gray-500">PTO this week: <span class="mono">${hm(d.pto)}</span> (not in the total)</div>` : ''}`;
   document.getElementById('drawer').classList.remove('hidden');
 }
 document.querySelectorAll('#drawer [data-close]').forEach(b => b.addEventListener('click', () => document.getElementById('drawer').classList.add('hidden')));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.getElementById('drawer').classList.add('hidden'); document.getElementById('settings').classList.add('hidden'); closeRename(); } });
-
-/* ═════════ Rename driver (writes driver_roster) ═════════ */
-let renameRef = null;
-function openRename(ref) {
-  renameRef = String(ref);
-  const cur = state.shifts.find(s => String(s.driver_ref) === renameRef);
-  document.getElementById('rnRef').textContent = '#' + renameRef;
-  document.getElementById('rnInput').value = (cur && cur.driver_name) || '';
-  document.getElementById('rnError').classList.add('hidden');
-  document.getElementById('rename').classList.remove('hidden');
-  setTimeout(() => document.getElementById('rnInput').focus(), 50);
-}
-function closeRename() { document.getElementById('rename').classList.add('hidden'); }
-async function saveRename() {
-  const name = document.getElementById('rnInput').value.trim().replace(/\s+/g, ' ');
-  const errEl = document.getElementById('rnError');
-  if (!realName(name)) { errEl.textContent = 'Enter a real name, not a number.'; errEl.classList.remove('hidden'); return; }
-  const btn = document.getElementById('rnSave'); btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    const now = new Date().toISOString();
-    const existing = state.roster && state.roster.get(renameRef);
-    let res;
-    if (existing && existing.id) {
-      res = await sb.from('driver_roster').update({ full_name: name, updated_at: now, updated_by: 'shift-hours' }).eq('driver_ref', renameRef).select('id,driver_ref,full_name');
-    } else {
-      res = await sb.from('driver_roster').insert({ driver_ref: renameRef, full_name: name, active: true, source: 'shift-hours', updated_at: now, updated_by: 'shift-hours' }).select('id,driver_ref,full_name');
-    }
-    if (res.error) throw res.error;
-    if (res.data && res.data[0]) state.roster.set(renameRef, res.data[0]);
-    state.shifts.forEach(s => { if (String(s.driver_ref) === renameRef) s.driver_name = name; });
-    closeRename();
-    render();
-    if (!document.getElementById('drawer').classList.contains('hidden')) {
-      const brand = state.shifts.find(s => String(s.driver_ref) === renameRef)?.brand;
-      if (brand) openDriver(brand + ':' + renameRef);
-    }
-  } catch (e) {
-    errEl.textContent = 'Could not save — ' + (e.message || e); errEl.classList.remove('hidden');
-  }
-  btn.disabled = false; btn.textContent = 'Save name';
-}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.getElementById('drawer').classList.add('hidden'); document.getElementById('settings').classList.add('hidden'); } });
 
 /* ═════════ CSV ═════════ */
 function exportCsv() {
   const { days, drivers } = aggregate(filtered());
-  const head = ['Site', 'Site name', 'Driver ref', 'Driver name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'Needs review'];
-  const lines = [head, ...drivers.sort((a, b) => SITE_ORDER.findIndex(x => x.code === a.brand) - SITE_ORDER.findIndex(x => x.code === b.brand) || b.total - a.total).map(d => [
-    d.brand, BRAND[d.brand].name, d.ref, d.name, ...days.map(day => hrs(d.perDay[day])), d.shifts, hrs(d.total), d.review,
+  const head = ['Group', 'Employee #', 'Name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'PTO hours', 'Needs review'];
+  const order = c => SITE_ORDER.findIndex(x => x.code === c);
+  const lines = [head, ...drivers.sort((a, b) => order(a.brand) - order(b.brand) || b.total - a.total).map(d => [
+    BRAND[d.brand].label, d.ref, d.name, ...days.map(day => hrs(d.perDay[day])), d.shifts, hrs(d.total), hrs(d.pto), d.review,
   ])].map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `shift-hours-${state.brand === 'all' ? 'all-sites' : state.brand.toLowerCase()}-${state.weekStart}.csv`;
+  const slug = state.brand === 'all' ? 'all-groups' : String(BRAND[state.brand].label).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  a.download = `shift-hours-${slug}-${state.weekStart}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
@@ -792,34 +601,35 @@ document.getElementById('search').oninput = e => { state.search = e.target.value
 document.getElementById('sortSel').onchange = e => { state.sort = e.target.value; render(); };
 document.getElementById('btnGroup').onclick = () => { SETTINGS.group = !SETTINGS.group; saveSettings(SETTINGS); render(); };
 
-document.getElementById('btnNoName').onclick = () => { state.noNameOnly = !state.noNameOnly; render(); };
-document.querySelectorAll('[data-close-rename]').forEach(b => b.addEventListener('click', closeRename));
-document.getElementById('rnSave').onclick = saveRename;
-document.getElementById('rnInput').addEventListener('keydown', e => { if (e.key === 'Enter') saveRename(); });
-
 document.getElementById('btnSettings').onclick = () => {
-  document.getElementById('setSites').value = SETTINGS.sites || DEFAULT_SITES;
+  const hidden = new Set(SETTINGS.hiddenGroups || []);
+  document.getElementById('setGroups').innerHTML = GROUPS.length ? GROUPS.map(g => `
+    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50">
+      <input type="checkbox" class="grp-cb accent-black" value="${esc(g.code)}" ${hidden.has(g.code) ? '' : 'checked'}>
+      ${chip(g.code)}
+    </label>`).join('') : '<div class="px-3 py-3 text-[12px] text-gray-500">No groups yet — they appear after the first sync.</div>';
   document.getElementById('setWeekStart').value = String(SETTINGS.weekStart);
   document.getElementById('setOt').value = SETTINGS.ot;
   document.getElementById('settings').classList.remove('hidden');
 };
 document.querySelectorAll('[data-close-settings]').forEach(b => b.addEventListener('click', () => document.getElementById('settings').classList.add('hidden')));
 document.getElementById('btnSaveSettings').onclick = () => {
+  const unchecked = [...document.querySelectorAll('.grp-cb')].filter(c => !c.checked).map(c => c.value);
   SETTINGS = {
-    sites: document.getElementById('setSites').value.trim() || DEFAULT_SITES,
+    hiddenGroups: GROUPS.length ? unchecked : (SETTINGS.hiddenGroups || []),
     group: SETTINGS.group,
     weekStart: Number(document.getElementById('setWeekStart').value),
     ot: Number(document.getElementById('setOt').value) || DEFAULTS.ot,
   };
   saveSettings(SETTINGS);
-  parseSites();
+  applyGroupFilter();
   state.weekStart = weekStartOf(state.weekStart, SETTINGS.weekStart);
   document.getElementById('settings').classList.add('hidden');
   state.shifts = [];
   load();
 };
 
-// Refresh live elapsed time each minute, and re-pull data while viewing the current week
+// Keep "on the clock" times ticking and pick up each new sync while viewing the current week
 setInterval(() => {
   const cur = weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart));
   if (state.weekStart === cur && !document.hidden) load();
