@@ -29,6 +29,8 @@
   .bar { height: 4px; border-radius: 2px; background: #f3f4f6; overflow: hidden; }
   .bar > span { display: block; height: 100%; background: #000; }
   .bar > span.ot { background: #D97757; }
+  .view-btn { color: #6b7280; } .view-btn:hover { background: #f9fafb; color: #000; }
+  .view-btn.on { background: #000; color: #fff; }
   .spinner { width: 20px; height: 20px; border: 2px solid #e5e7eb; border-top-color: #111; border-radius: 50%; animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg) } }
   @media (max-width: 639px) { input, select { font-size: 16px !important; } }
@@ -57,7 +59,7 @@
     <div>
       <div class="eyebrow mb-2">Operations · QuickBooks Time · Timesheets</div>
       <h1 class="display-font text-[32px] sm:text-[38px] font-semibold leading-none">Shift Hours.</h1>
-      <p class="text-[13px] text-gray-500 mt-2">Weekly clocked hours per driver from QuickBooks Time, grouped by QuickBooks Time group.</p>
+      <p class="text-[13px] text-gray-500 mt-2">Weekly clocked hours per driver from QuickBooks Time — by QuickBooks Time group, or combined by site.</p>
     </div>
     <div class="lg:ml-auto flex flex-wrap items-center gap-2">
       <div class="flex items-center rounded-md border border-gray-200 bg-white overflow-hidden">
@@ -99,7 +101,11 @@
             <option value="name">Sort · Name</option>
             <option value="shifts">Sort · Shifts</option>
           </select>
-          <button id="btnGroup" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12px] font-medium flex items-center gap-1.5" title="Group by QuickBooks Time group"><i class="ph-bold ph-stack"></i><span class="hidden sm:inline">Grouped</span></button>
+          <div class="flex items-center rounded-md border border-gray-200 bg-white overflow-hidden text-[12px] font-medium" role="group" aria-label="View by">
+            <button id="viewGroup" class="view-btn h-8 px-2.5 flex items-center gap-1.5" title="Columns by QuickBooks Time group"><i class="ph-bold ph-users-three"></i>Groups</button>
+            <button id="viewSite" class="view-btn h-8 px-2.5 flex items-center gap-1.5 border-l border-gray-200" title="Groups combined by site"><i class="ph-bold ph-map-pin"></i>Sites</button>
+          </div>
+          <button id="btnGroup" class="h-8 px-2.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[12px] font-medium flex items-center gap-1.5" title="Show section headers"><i class="ph-bold ph-stack"></i><span class="hidden sm:inline">Sections</span></button>
         </div>
       </div>
       <div class="overflow-x-auto custom-scroll">
@@ -163,16 +169,18 @@
 <!-- Settings -->
 <div id="settings" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div class="absolute inset-0 backdrop" data-close-settings></div>
-  <div class="relative w-full max-w-md bg-white rounded-[10px] border border-gray-200 panel-enter">
+  <div class="relative w-full max-w-lg bg-white rounded-[10px] border border-gray-200 panel-enter">
     <div class="px-6 py-4 border-b border-gray-100">
       <div class="eyebrow mb-1">Admin · Configuration</div>
       <div class="display-font text-[20px] font-semibold">Settings.</div>
     </div>
     <div class="px-6 py-5 space-y-5 text-[13px]">
       <div>
-        <label class="th block mb-1.5">QuickBooks Time groups to show</label>
-        <div id="setGroups" class="max-h-56 overflow-y-auto custom-scroll border border-gray-200 rounded-md divide-y divide-gray-100"></div>
-        <p class="text-[11.5px] text-gray-500 mt-1.5">Untick office staff or anyone who isn't a driver. New groups show by default.</p>
+        <div class="flex items-end mb-1.5"><label class="th">Groups · show · site</label><span class="ml-auto text-[10.5px] text-gray-400">Site is shared with everyone</span></div>
+        <div id="setGroups" class="max-h-72 overflow-y-auto custom-scroll border border-gray-200 rounded-md divide-y divide-gray-100"></div>
+        <datalist id="siteNames"></datalist>
+        <p class="text-[11.5px] text-gray-500 mt-1.5">Untick office staff or anyone who isn't a driver. The site is guessed from the group name (Eugene Fleet and Eugene - Stretcher → Eugene); type a different one to move a group. Clear it to go back to the guess.</p>
+        <div id="setError" class="hidden mt-2 text-[12px] text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -204,7 +212,7 @@ const REFRESH_MS = 60000;
 const LONG_SHIFT_MIN = 16 * 60;   // shifts longer than this are flagged
 const STALE_SYNC_MIN = 15;        // warn when the last good sync is older than this
 
-const DEFAULTS = { hiddenGroups: [], weekStart: 1, ot: 40, group: true };
+const DEFAULTS = { hiddenGroups: [], weekStart: 1, ot: 40, group: true, view: 'group' };
 function loadSettings() {
   try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('shifthours.qbt.settings') || '{}')); }
   catch (e) { return { ...DEFAULTS }; }
@@ -219,10 +227,30 @@ const CHIPS = { XDLX: 'bg-blue-50 text-blue-700', DLX: 'bg-blue-50 text-blue-700
   XDMT: 'bg-emerald-50 text-emerald-700', DMT: 'bg-emerald-50 text-emerald-700', XCC: 'bg-cyan-50 text-cyan-700', RBG: 'bg-amber-50 text-amber-700',
   XLB: 'bg-purple-50 text-purple-700', XSLM: 'bg-orange-50 text-orange-700', XGP: 'bg-red-50 text-red-700' };
 // Group codes are "g:<company>:<group id>"; 0 = people with no group. One QuickBooks Time company per <company>.
-let GROUPS = [];        // [{ code, company, id, name, label }] — from qbt_groups
-let SITE_ORDER = [];    // groups that are shown (not hidden in settings)
+let GROUPS = [];        // [{ code, company, id, name, label, site, siteGuess }] — from qbt_groups
+let SITES = [];         // [{ code, name, label }] — groups combined by site
+let SITE_ORDER = [];    // buckets for the current view (groups or sites), minus hidden groups
+let VISIBLE_GROUPS = new Set();
+let SITE_MAP = new Map(); // "company:group_id" → site, from qbt_site_map (manual overrides)
 const gcode = (company, id) => `g:${company}:${id || 0}`;
+const scode = site => 's:' + site.trim().toLowerCase();
+const NO_SITE = 'No site';
+const PALETTE = ['bg-blue-50 text-blue-700', 'bg-emerald-50 text-emerald-700', 'bg-cyan-50 text-cyan-700', 'bg-amber-50 text-amber-700',
+  'bg-purple-50 text-purple-700', 'bg-orange-50 text-orange-700', 'bg-red-50 text-red-700', 'bg-pink-50 text-pink-700',
+  'bg-lime-50 text-lime-700', 'bg-indigo-50 text-indigo-700', 'bg-teal-50 text-teal-700', 'bg-rose-50 text-rose-700'];
+
+/* "Eugene Fleet" → Eugene, "Eugene - Stretcher" → Eugene, "Albany/Lebanon - Stretcher" → Albany/Lebanon. */
+function guessSite(groupName) {
+  if (!groupName || groupName === 'No group') return NO_SITE;
+  const t = groupName.replace(/\s+[-–—]\s+.*$/, '').replace(/\s+fleet$/i, '').trim();
+  return t || groupName.trim();
+}
 function groupInfo(code) {
+  if (code.startsWith('s:')) {
+    const i = SITES.findIndex(x => x.code === code), st = SITES[i] || { label: code };
+    const key = st.label.toUpperCase();
+    return { label: st.label, name: st.label, chip: CHIPS[key] || (st.label === NO_SITE ? 'bg-gray-100 text-gray-700' : PALETTE[i % PALETTE.length]) };
+  }
   const g = GROUPS.find(x => x.code === code) || { name: code, label: code };
   const key = String(g.name || '').trim().toUpperCase();
   return { label: g.label, name: g.label, chip: CHIPS[key] || CHIPS[key.split(/\s+/)[0]] || 'bg-gray-100 text-gray-700' };
@@ -268,15 +296,18 @@ async function load() {
   state.loading = true; render(); hideError();
   const ws = state.weekStart, we = addDays(ws, 6);
   try {
-    const [groups, users, sheets, sync] = await Promise.all([
+    const [groups, users, sheets, sync, siteMap] = await Promise.all([
       fetchAll(() => sb.from('qbt_groups').select('company,id,name,active').order('company').order('name')),
       fetchAll(() => sb.from('qbt_users').select('company,id,first_name,last_name,display_name,group_id,active,employee_number').order('company').order('id')),
       fetchAll(() => sb.from('qbt_timesheets')
         .select('company,id,user_id,jobcode_type,type,date,start_at,end_at,duration_sec,on_the_clock')
         .gte('date', ws).lte('date', we).order('date')),
       sb.from('qbt_sync_status').select('company,label,last_run_at,last_ok_at,ok,message'),
+      sb.from('qbt_site_map').select('company,group_id,site'),
     ]);
     if (sync.error) throw sync.error;
+    if (siteMap.error) throw siteMap.error;
+    SITE_MAP = new Map((siteMap.data || []).map(r => [`${r.company}:${r.group_id}`, r.site]));
     state.syncs = sync.data || [];
     state.everSynced = state.syncs.some(x => x.last_ok_at);
 
@@ -290,10 +321,12 @@ async function load() {
       if (users.some(u => u.company === c && !u.group_id)) GROUPS.push({ code: gcode(c, 0), company: c, id: 0, name: 'No group', label: lbl(c, 'No group') });
     }
     GROUPS.sort((a, b) => coLabel(a.company).localeCompare(coLabel(b.company)) || (a.id === 0) - (b.id === 0) || a.name.localeCompare(b.name));
+    buildSites();
     applyGroupFilter();
 
     const byUser = new Map(users.map(u => [`${u.company}:${u.id}`, u]));
     state.shifts = toShifts(sheets, byUser);
+    applyGroupFilter();
     state.lastLoad = new Date();
   } catch (err) {
     console.error(err);
@@ -303,10 +336,34 @@ async function load() {
   render();
 }
 
+function buildSites() {
+  for (const g of GROUPS) {
+    g.siteGuess = guessSite(g.name);
+    g.site = SITE_MAP.get(`${g.company}:${g.id}`) || g.siteGuess;
+  }
+  const names = [...new Set(GROUPS.map(g => g.site))];
+  names.sort((a, b) => (a === NO_SITE) - (b === NO_SITE) || a.localeCompare(b));
+  SITES = names.map(n => ({ code: scode(n), name: n, label: n }));
+}
+
+// Settings saved before multi-company used "g<id>" for the main company; read those as main's groups.
+function hiddenGroupSet() {
+  return new Set((SETTINGS.hiddenGroups || []).map(c => { const m = /^g(\d+)$/.exec(c); return m ? gcode('main', +m[1]) : c; }));
+}
+
+/* Decide the buckets for the current view and point every shift at its bucket. */
 function applyGroupFilter() {
-  // Settings saved before multi-company used "g<id>" for the main company; read those as main's groups.
-  const hidden = new Set((SETTINGS.hiddenGroups || []).map(c => { const m = /^g(\d+)$/.exec(c); return m ? gcode('main', +m[1]) : c; }));
-  SITE_ORDER = GROUPS.filter(g => !hidden.has(g.code));
+  const hidden = hiddenGroupSet();
+  const shownGroups = GROUPS.filter(g => !hidden.has(g.code));
+  VISIBLE_GROUPS = new Set(shownGroups.map(g => g.code));
+  if (SETTINGS.view === 'site') {
+    const used = new Set(shownGroups.map(g => scode(g.site)));
+    SITE_ORDER = SITES.filter(x => used.has(x.code));
+  } else {
+    SITE_ORDER = shownGroups;
+  }
+  const siteOf = new Map(GROUPS.map(g => [g.code, scode(g.site)]));
+  for (const sh of state.shifts) sh.brand = SETTINGS.view === 'site' ? (siteOf.get(sh.group) || scode(NO_SITE)) : sh.group;
 }
 
 function personName(u) {
@@ -322,14 +379,14 @@ function toShifts(sheets, byUser) {
   for (const t of sheets) {
     if (t.jobcode_type === 'unpaid_break') continue;
     const u = byUser.get(`${t.company}:${t.user_id}`);
-    const brand = gcode(t.company, u && u.group_id);
+    const group = gcode(t.company, u && u.group_id);
     let min = Math.max(0, (t.duration_sec || 0) / 60), kind = 'ok', ptoMin = 0;
     if (t.jobcode_type === 'pto') { ptoMin = min; min = 0; kind = 'pto'; }
     else if (t.on_the_clock && t.start_at) { min = Math.max(0, (now - Date.parse(t.start_at)) / 60000); kind = min > LONG_SHIFT_MIN ? 'long' : 'live'; }
     else if (t.type === 'manual') { kind = 'manual'; }
     else if (min > LONG_SHIFT_MIN) { kind = 'long'; }
     out.push({
-      id: `${t.company}:${t.id}`, user_id: `${t.company}:${t.user_id}`, date: t.date, brand,
+      id: `${t.company}:${t.id}`, user_id: `${t.company}:${t.user_id}`, date: t.date, group, brand: group,
       ref: u && u.employee_number ? String(u.employee_number) : '',
       name: personName(u) || `QuickBooks Time user ${t.user_id}`,
       start_at: t.start_at, end_at: t.end_at, on_the_clock: !!t.on_the_clock,
@@ -360,8 +417,7 @@ function aggregate(shifts) {
 }
 
 function visibleShifts() {
-  const shown = new Set(SITE_ORDER.map(g => g.code));
-  return state.shifts.filter(s => shown.has(s.brand));
+  return state.shifts.filter(s => VISIBLE_GROUPS.has(s.group));
 }
 function filtered() {
   let s = visibleShifts();
@@ -383,6 +439,8 @@ function render() {
   document.getElementById('brandTabs').innerHTML = tabDefs.map(t => `
     <button data-brand="${esc(t.code)}" class="tab ${t.code === state.brand ? 'active' : ''} pb-2.5 mono text-[11px] uppercase tracking-[0.12em] font-semibold whitespace-nowrap hover:text-black ${t.n || pending || t.code === state.brand ? 'text-gray-400' : 'text-gray-300'}">${esc(t.text)} <span class="text-gray-400 font-normal">${pending ? '' : t.n}</span></button>`).join('');
   document.querySelectorAll('#brandTabs .tab').forEach(t => t.addEventListener('click', () => { state.brand = t.dataset.brand; render(); }));
+  document.getElementById('viewGroup').classList.toggle('on', SETTINGS.view !== 'site');
+  document.getElementById('viewSite').classList.toggle('on', SETTINGS.view === 'site');
   const gb = document.getElementById('btnGroup');
   gb.classList.toggle('hidden', state.brand !== 'all'); gb.classList.toggle('flex', state.brand === 'all');
   gb.classList.toggle('!border-black', !!SETTINGS.group);
@@ -594,7 +652,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.g
 /* ═════════ CSV ═════════ */
 function exportCsv() {
   const { days, drivers } = aggregate(filtered());
-  const head = ['Group', 'Employee #', 'Name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'PTO hours', 'Needs review'];
+  const head = [SETTINGS.view === 'site' ? 'Site' : 'Group', 'Employee #', 'Name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'PTO hours', 'Needs review'];
   const order = c => SITE_ORDER.findIndex(x => x.code === c);
   const lines = [head, ...drivers.sort((a, b) => order(a.brand) - order(b.brand) || b.total - a.total).map(d => [
     BRAND[d.brand].label, d.ref, d.name, ...days.map(day => hrs(d.perDay[day])), d.shifts, hrs(d.total), hrs(d.pto), d.review,
@@ -602,7 +660,7 @@ function exportCsv() {
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  const slug = state.brand === 'all' ? 'all-groups' : String(BRAND[state.brand].label).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const slug = state.brand === 'all' ? (SETTINGS.view === 'site' ? 'all-sites' : 'all-groups') : String(BRAND[state.brand].label).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   a.download = `shift-hours-${slug}-${state.weekStart}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -621,24 +679,64 @@ document.getElementById('btnCsv').onclick = exportCsv;
 document.getElementById('search').oninput = e => { state.search = e.target.value; render(); };
 document.getElementById('sortSel').onchange = e => { state.sort = e.target.value; render(); };
 document.getElementById('btnGroup').onclick = () => { SETTINGS.group = !SETTINGS.group; saveSettings(SETTINGS); render(); };
+function setView(v) {
+  if (SETTINGS.view === v) return;
+  SETTINGS.view = v; saveSettings(SETTINGS);
+  state.brand = 'all'; state.collapsed = {};
+  applyGroupFilter(); render();
+}
+document.getElementById('viewGroup').onclick = () => setView('group');
+document.getElementById('viewSite').onclick = () => setView('site');
 
 document.getElementById('btnSettings').onclick = () => {
-  const hidden = new Set(SETTINGS.hiddenGroups || []);
+  const hidden = hiddenGroupSet();
+  document.getElementById('setError').classList.add('hidden');
+  document.getElementById('siteNames').innerHTML = SITES.filter(x => x.name !== NO_SITE).map(x => `<option value="${esc(x.name)}">`).join('');
   document.getElementById('setGroups').innerHTML = GROUPS.length ? GROUPS.map(g => `
-    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50">
-      <input type="checkbox" class="grp-cb accent-black" value="${esc(g.code)}" ${hidden.has(g.code) ? '' : 'checked'}>
-      ${chip(g.code)}
-    </label>`).join('') : '<div class="px-3 py-3 text-[12px] text-gray-500">No groups yet — they appear after the first sync.</div>';
+    <div class="flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-50">
+      <input type="checkbox" class="grp-cb accent-black flex-shrink-0" value="${esc(g.code)}" ${hidden.has(g.code) ? '' : 'checked'} aria-label="Show ${esc(g.label)}">
+      <span class="min-w-0 flex-1 truncate">${chip(g.code)}</span>
+      ${g.id === 0 ? `<span class="w-36 text-[11.5px] text-gray-400 px-2">${esc(NO_SITE)}</span>` :
+        `<input class="site-in w-36 h-7 px-2 rounded-md border border-gray-200 text-[12px] focus:outline-none focus:border-black ${SITE_MAP.has(`${g.company}:${g.id}`) ? '' : 'text-gray-500'}"
+           list="siteNames" data-company="${esc(g.company)}" data-id="${g.id}" data-guess="${esc(g.siteGuess)}"
+           value="${esc(SITE_MAP.get(`${g.company}:${g.id}`) || '')}" placeholder="${esc(g.siteGuess)}" maxlength="60">`}
+    </div>`).join('') : '<div class="px-3 py-3 text-[12px] text-gray-500">No groups yet — they appear after the first sync.</div>';
   document.getElementById('setWeekStart').value = String(SETTINGS.weekStart);
   document.getElementById('setOt').value = SETTINGS.ot;
   document.getElementById('settings').classList.remove('hidden');
 };
 document.querySelectorAll('[data-close-settings]').forEach(b => b.addEventListener('click', () => document.getElementById('settings').classList.add('hidden')));
-document.getElementById('btnSaveSettings').onclick = () => {
+/* Save site overrides to Supabase: typed value that differs from the guess → upsert; blank or same as guess → delete. */
+async function saveSiteOverrides() {
+  const ups = [], dels = [];
+  for (const el of document.querySelectorAll('.site-in')) {
+    const company = el.dataset.company, id = Number(el.dataset.id), val = el.value.trim().replace(/\s+/g, ' ');
+    const key = `${company}:${id}`, cur = SITE_MAP.get(key) || '';
+    const want = val && val.toLowerCase() !== el.dataset.guess.toLowerCase() ? val : '';
+    if (want === cur) continue;
+    if (want) ups.push({ company, group_id: id, site: want, updated_at: new Date().toISOString() });
+    else dels.push({ company, id });
+  }
+  if (ups.length) { const { error } = await sb.from('qbt_site_map').upsert(ups, { onConflict: 'company,group_id' }); if (error) throw error; }
+  for (const d of dels) { const { error } = await sb.from('qbt_site_map').delete().eq('company', d.company).eq('group_id', d.id); if (error) throw error; }
+  return ups.length + dels.length;
+}
+
+document.getElementById('btnSaveSettings').onclick = async () => {
+  const btn = document.getElementById('btnSaveSettings');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try { await saveSiteOverrides(); }
+  catch (e) {
+    const el = document.getElementById('setError'); el.textContent = 'Could not save sites — ' + (e.message || e); el.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Save settings';
+    return;
+  }
+  btn.disabled = false; btn.textContent = 'Save settings';
   const unchecked = [...document.querySelectorAll('.grp-cb')].filter(c => !c.checked).map(c => c.value);
   SETTINGS = {
     hiddenGroups: GROUPS.length ? unchecked : (SETTINGS.hiddenGroups || []),
     group: SETTINGS.group,
+    view: SETTINGS.view,
     weekStart: Number(document.getElementById('setWeekStart').value),
     ot: Number(document.getElementById('setOt').value) || DEFAULTS.ot,
   };
