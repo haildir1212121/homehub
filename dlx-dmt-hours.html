@@ -166,6 +166,63 @@
   </div>
 </div>
 
+<!-- Export -->
+<div id="exportDlg" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div class="absolute inset-0 backdrop" data-close-export></div>
+  <div class="relative w-full max-w-lg bg-white rounded-[10px] border border-gray-200 panel-enter">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <div class="eyebrow mb-1">Export · CSV</div>
+      <div class="display-font text-[20px] font-semibold">Export timesheets.</div>
+    </div>
+    <div class="px-6 py-5 space-y-5 text-[13px]">
+      <div>
+        <label class="th block mb-1.5">Format</label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="flex items-start gap-2 p-2.5 rounded-md border border-gray-200 cursor-pointer hover:bg-gray-50">
+            <input type="radio" name="exFormat" value="report" class="mt-0.5 accent-black" checked>
+            <span><span class="font-medium block">Timesheet report</span><span class="text-[11.5px] text-gray-500">QuickBooks Time layout, one row per timesheet</span></span>
+          </label>
+          <label class="flex items-start gap-2 p-2.5 rounded-md border border-gray-200 cursor-pointer hover:bg-gray-50">
+            <input type="radio" name="exFormat" value="summary" class="mt-0.5 accent-black">
+            <span><span class="font-medium block">Weekly summary</span><span class="text-[11.5px] text-gray-500">The table on screen, this week</span></span>
+          </label>
+        </div>
+      </div>
+      <div id="exReportOpts" class="space-y-5">
+        <div>
+          <label class="th block mb-1.5">Dates</label>
+          <div class="flex flex-wrap gap-1.5 mb-2" id="exPresets">
+            <button data-preset="today" class="h-7 px-2.5 rounded-md border border-gray-200 text-[12px] hover:bg-gray-50">Today</button>
+            <button data-preset="yesterday" class="h-7 px-2.5 rounded-md border border-gray-200 text-[12px] hover:bg-gray-50">Yesterday</button>
+            <button data-preset="week" class="h-7 px-2.5 rounded-md border border-gray-200 text-[12px] hover:bg-gray-50">Week on screen</button>
+            <button data-preset="lastweek" class="h-7 px-2.5 rounded-md border border-gray-200 text-[12px] hover:bg-gray-50">Week before</button>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><div class="text-[11px] text-gray-500 mb-1">From</div><input id="exFrom" type="date" class="w-full h-9 px-2 rounded-md border border-gray-200 mono text-[12.5px] focus:outline-none focus:border-black"></div>
+            <div><div class="text-[11px] text-gray-500 mb-1">Through</div><input id="exTo" type="date" class="w-full h-9 px-2 rounded-md border border-gray-200 mono text-[12.5px] focus:outline-none focus:border-black"></div>
+          </div>
+          <div id="exRange" class="text-[11.5px] text-gray-500 mt-1.5"></div>
+        </div>
+        <div>
+          <label class="th block mb-1.5">Company · one file each</label>
+          <div id="exCompanies" class="border border-gray-200 rounded-md divide-y divide-gray-100"></div>
+          <p class="text-[11.5px] text-gray-500 mt-1.5">Layout matches each company's own QuickBooks Time export — the Deluxe report has an extra <span class="mono">billable</span> column.</p>
+        </div>
+        <label class="flex items-start gap-2 text-[12.5px] cursor-pointer">
+          <input id="exOnlyShown" type="checkbox" class="accent-black mt-0.5">
+          <span>Only groups shown on this page<span class="block text-[11.5px] text-gray-500">Leave off to include everyone, like QuickBooks Time does</span></span>
+        </label>
+      </div>
+      <div id="exError" class="hidden text-[12px] text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"></div>
+      <div id="exDone" class="hidden text-[12px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2"></div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
+      <button class="h-9 px-3 rounded-md border border-gray-200 text-[12.5px] font-medium hover:bg-gray-50" data-close-export>Close</button>
+      <button id="exGo" class="h-9 px-3 rounded-md bg-black text-white text-[12.5px] font-medium hover:bg-gray-800 disabled:opacity-50 flex items-center gap-1.5"><i class="ph-bold ph-download-simple"></i>Download</button>
+    </div>
+  </div>
+</div>
+
 <!-- Settings -->
 <div id="settings" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div class="absolute inset-0 backdrop" data-close-settings></div>
@@ -647,9 +704,158 @@ function openDriver(key) {
   document.getElementById('drawer').classList.remove('hidden');
 }
 document.querySelectorAll('#drawer [data-close]').forEach(b => b.addEventListener('click', () => document.getElementById('drawer').classList.add('hidden')));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.getElementById('drawer').classList.add('hidden'); document.getElementById('settings').classList.add('hidden'); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.getElementById('drawer').classList.add('hidden'); document.getElementById('settings').classList.add('hidden'); document.getElementById('exportDlg').classList.add('hidden'); } });
 
-/* ═════════ CSV ═════════ */
+/* ═════════ Timesheet report export (QuickBooks Time layout) ═════════
+ * Same columns and order as QuickBooks Time's own "timesheet report" CSV. Deluxe's report carries an extra
+ * "billable" column after jobcode; Direct's doesn't. One file per company. Columns we don't sync stay blank:
+ * payroll_id when unset, billable, class, service item, notes, has_flags, flag_types.
+ */
+const REPORT_COLS = ['username', 'payroll_id', 'fname', 'lname', 'number', 'group', 'local_date', 'local_day', 'local_start_time',
+  'local_end_time', 'tz', 'hours', 'jobcode', 'billable', 'class', 'service item', 'location', 'notes', 'approved_status', 'has_flags', 'flag_types'];
+const LAYOUTS = {
+  deluxe: { name: 'Deluxe layout (with billable)', cols: REPORT_COLS },
+  direct: { name: 'Direct layout', cols: REPORT_COLS.filter(c => c !== 'billable') },
+};
+const guessLayout = label => /deluxe|dlx|oregon taxi/i.test(label || '') ? 'deluxe' : 'direct';
+
+// QuickBooks Time quotes the header row, and any value with a space, comma or quote in it.
+const csvHead = cols => cols.map(c => `"${c}"`).join(',');
+const csvCell = v => { const t = String(v ?? ''); return /[\s",]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+
+function laOffsetHours(iso) {
+  try {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: TZ, timeZoneName: 'shortOffset' }).formatToParts(new Date(iso)).find(x => x.type === 'timeZoneName');
+    const m = /GMT([+-]\d+)(?::(\d+))?/.exec(p && p.value || '');
+    return m ? Number(m[1]) + (m[2] ? Math.sign(Number(m[1])) * Number(m[2]) / 60 : 0) : -8;
+  } catch (e) { return -8; }
+}
+function localStamp(iso, tz) { return new Date(Date.parse(iso) + tz * 3600000).toISOString().slice(0, 19).replace('T', ' '); }
+
+async function buildReport(company, from, to, onlyShown, layoutKey) {
+  const [groups, users, sheets] = await Promise.all([
+    fetchAll(() => sb.from('qbt_groups').select('id,name').eq('company', company).order('id')),
+    fetchAll(() => sb.from('qbt_users').select('id,username,payroll_id,first_name,last_name,display_name,employee_number,group_id,approved_to').eq('company', company).order('id')),
+    fetchAll(() => sb.from('qbt_timesheets')
+      .select('id,user_id,jobcode_name,type,date,start_at,end_at,duration_sec,on_the_clock,tz,location')
+      .eq('company', company).gte('date', from).lte('date', to).order('date').order('id')),
+  ]);
+  const gName = new Map(groups.map(g => [g.id, g.name]));
+  const byUser = new Map(users.map(u => [u.id, u]));
+  const now = Date.now();
+  const rows = [];
+  for (const t of sheets) {
+    const u = byUser.get(t.user_id) || {};
+    if (onlyShown && !VISIBLE_GROUPS.has(gcode(company, u.group_id))) continue;
+    const tz = t.tz !== null && t.tz !== undefined ? Number(t.tz) : (t.start_at ? laOffsetHours(t.start_at) : -8);
+    const sec = t.on_the_clock && t.start_at ? Math.max(0, (now - Date.parse(t.start_at)) / 1000) : (t.duration_sec || 0);
+    const r = {
+      username: u.username || '',
+      payroll_id: u.payroll_id || '',
+      fname: u.first_name || '',
+      lname: u.last_name || '',
+      number: u.employee_number || 0,
+      group: (u.group_id && gName.get(u.group_id)) || '-',
+      local_date: t.date,
+      local_day: fmtDay(t.date, { weekday: 'short' }),
+      local_start_time: t.start_at ? localStamp(t.start_at, tz) : '',
+      local_end_time: t.end_at && !t.on_the_clock ? localStamp(t.end_at, tz) : '',
+      tz: tz.toFixed(1),
+      hours: (sec / 3600).toFixed(2),
+      jobcode: t.jobcode_name || 'Shift Total',
+      billable: '', class: '', 'service item': '',
+      location: t.location || '',
+      notes: '',
+      approved_status: u.approved_to && t.date <= u.approved_to ? 'approved' : 'unapproved',
+      has_flags: '', flag_types: '',
+      _sort: [(u.first_name || '').toLowerCase(), (u.last_name || '').toLowerCase(), t.start_at || t.date, t.id],
+    };
+    rows.push(r);
+  }
+  rows.sort((a, b) => { for (let i = 0; i < 4; i++) { if (a._sort[i] < b._sort[i]) return -1; if (a._sort[i] > b._sort[i]) return 1; } return 0; });
+  const cols = LAYOUTS[layoutKey].cols;
+  // QuickBooks Time writes Windows line endings (CRLF), with one after the last row too.
+  const text = [csvHead(cols), ...rows.map(r => cols.map(c => csvCell(r[c])).join(','))].join('\r\n') + '\r\n';
+  return { text, count: rows.length };
+}
+
+function downloadText(name, text) {
+  const blob = new Blob([text], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function companiesForExport() {
+  const seen = new Map();
+  for (const s of state.syncs || []) seen.set(s.company, s.label || s.company.toUpperCase());
+  for (const g of GROUPS) if (!seen.has(g.company)) seen.set(g.company, g.company.toUpperCase());
+  return [...seen].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function setExportRange(from, to) {
+  document.getElementById('exFrom').value = from; document.getElementById('exTo').value = to; showExportRange();
+}
+function showExportRange() {
+  const f = document.getElementById('exFrom').value, t = document.getElementById('exTo').value, el = document.getElementById('exRange');
+  if (!f || !t) { el.textContent = ''; return; }
+  const days = Math.round((Date.parse(t) - Date.parse(f)) / 86400000) + 1;
+  el.textContent = days > 0 ? `${fmtDay(f, { weekday: 'short', month: 'short', day: 'numeric' })} – ${fmtDay(t, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${days} day${days === 1 ? '' : 's'}` : 'The end date is before the start date.';
+  el.className = `text-[11.5px] mt-1.5 ${days > 0 ? 'text-gray-500' : 'text-red-700'}`;
+}
+
+async function openExport() {
+  document.getElementById('exError').classList.add('hidden'); document.getElementById('exDone').classList.add('hidden');
+  setExportRange(state.weekStart, addDays(state.weekStart, 6));
+  const cos = companiesForExport();
+  document.getElementById('exCompanies').innerHTML = cos.length ? cos.map(c => `
+    <div class="flex items-center gap-2.5 px-3 py-2">
+      <input type="checkbox" class="ex-co accent-black" value="${esc(c.key)}" checked aria-label="Export ${esc(c.label)}">
+      <span class="flex-1 font-medium">${esc(c.label)}</span>
+      <select class="ex-layout h-7 px-1.5 rounded-md border border-gray-200 bg-white text-[11.5px] focus:outline-none focus:border-black" data-company="${esc(c.key)}">
+        ${Object.entries(LAYOUTS).map(([k, l]) => `<option value="${k}" ${guessLayout(c.label) === k ? 'selected' : ''}>${l.name}</option>`).join('')}
+      </select>
+    </div>`).join('') : '<div class="px-3 py-3 text-[12px] text-gray-500">No companies synced yet.</div>';
+  toggleExportFormat();
+  document.getElementById('exportDlg').classList.remove('hidden');
+}
+function toggleExportFormat() {
+  const report = document.querySelector('input[name=exFormat]:checked').value === 'report';
+  document.getElementById('exReportOpts').classList.toggle('hidden', !report);
+}
+
+async function runExport() {
+  const err = document.getElementById('exError'), done = document.getElementById('exDone'), btn = document.getElementById('exGo');
+  err.classList.add('hidden'); done.classList.add('hidden');
+  if (document.querySelector('input[name=exFormat]:checked').value === 'summary') { exportCsv(); done.textContent = 'Weekly summary downloaded.'; done.classList.remove('hidden'); return; }
+  const from = document.getElementById('exFrom').value, to = document.getElementById('exTo').value;
+  const picks = [...document.querySelectorAll('.ex-co')].filter(c => c.checked).map(c => c.value);
+  const fail = m => { err.textContent = m; err.classList.remove('hidden'); };
+  if (!from || !to) return fail('Pick a start and end date.');
+  if (to < from) return fail('The end date is before the start date.');
+  if (!picks.length) return fail('Tick at least one company.');
+  btn.disabled = true; btn.lastChild.textContent = 'Preparing…';
+  try {
+    const lines = [];
+    for (const key of picks) {
+      const label = (companiesForExport().find(c => c.key === key) || {}).label || key;
+      const layout = document.querySelector(`.ex-layout[data-company="${CSS.escape(key)}"]`).value;
+      const { text, count } = await buildReport(key, from, to, document.getElementById('exOnlyShown').checked, layout);
+      const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      downloadText(`timesheet_report_${from}_thru_${to}_${slug}.csv`, text);
+      lines.push(`${label}: ${count} timesheet${count === 1 ? '' : 's'}`);
+      await new Promise(r => setTimeout(r, 400)); // let the browser start each download
+    }
+    done.textContent = 'Downloaded — ' + lines.join(' · ');
+    done.classList.remove('hidden');
+  } catch (e) {
+    console.error(e); fail('Could not export — ' + (e.message || e));
+  }
+  btn.disabled = false; btn.lastChild.textContent = 'Download';
+}
+
+/* ═════════ CSV (weekly summary) ═════════ */
 function exportCsv() {
   const { days, drivers } = aggregate(filtered());
   const head = [SETTINGS.view === 'site' ? 'Site' : 'Group', 'Employee #', 'Name', ...days.map(d => fmtDay(d, { weekday: 'short', month: 'numeric', day: 'numeric' })), 'Shifts', 'Total hours', 'PTO hours', 'Needs review'];
@@ -675,7 +881,20 @@ document.getElementById('wkPrev').onclick = () => { state.weekStart = addDays(st
 document.getElementById('wkNext').onclick = () => { state.weekStart = addDays(state.weekStart, 7); state.shifts = []; load(); };
 document.getElementById('wkThis').onclick = () => { state.weekStart = weekStartOf(pstDateStr(new Date()), Number(SETTINGS.weekStart)); state.shifts = []; load(); };
 document.getElementById('btnRefresh').onclick = () => load();
-document.getElementById('btnCsv').onclick = exportCsv;
+document.getElementById('btnCsv').onclick = openExport;
+document.querySelectorAll('[data-close-export]').forEach(b => b.addEventListener('click', () => document.getElementById('exportDlg').classList.add('hidden')));
+document.querySelectorAll('input[name=exFormat]').forEach(r => r.addEventListener('change', toggleExportFormat));
+document.getElementById('exFrom').addEventListener('change', showExportRange);
+document.getElementById('exTo').addEventListener('change', showExportRange);
+document.getElementById('exGo').onclick = runExport;
+document.querySelectorAll('#exPresets [data-preset]').forEach(b => b.addEventListener('click', () => {
+  const today = pstDateStr(new Date());
+  const p = b.dataset.preset;
+  if (p === 'today') setExportRange(today, today);
+  else if (p === 'yesterday') { const y = addDays(today, -1); setExportRange(y, y); }
+  else if (p === 'week') setExportRange(state.weekStart, addDays(state.weekStart, 6));
+  else if (p === 'lastweek') setExportRange(addDays(state.weekStart, -7), addDays(state.weekStart, -1));
+}));
 document.getElementById('search').oninput = e => { state.search = e.target.value; render(); };
 document.getElementById('sortSel').onchange = e => { state.sort = e.target.value; render(); };
 document.getElementById('btnGroup').onclick = () => { SETTINGS.group = !SETTINGS.group; saveSettings(SETTINGS); render(); };
